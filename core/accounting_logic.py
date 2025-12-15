@@ -1,6 +1,6 @@
 from collections import defaultdict
 from core.database import execute_query, Database
-from core.models import UcetniPohyb
+from core.models import UcetniPohyb  # Ponecháme, i když Třída Transakce není využita
 
 
 class AccountingEngine:
@@ -9,8 +9,14 @@ class AccountingEngine:
     def __init__(self, klient_id):
         self.klient_id = klient_id
 
-    def get_zustaatek_uctu(self, ucet: str) -> float:
-        # Původní kód je v pořádku
+    def get_ucet_nazev(self, ucet: str) -> str:
+        """Načte název účtu z účtového rozvrhu."""
+        sql = "SELECT nazev FROM UctovyRozvrh WHERE ucet = ?"
+        result = execute_query(sql, (ucet,))
+        return result[0][0] if result else ucet
+
+    def get_zustatek_uctu(self, ucet: str) -> float:
+        # Ponecháno, v pořádku
         sql_query = """
         SELECT 
             SUM(CASE WHEN smer = 'MD' THEN castka ELSE 0 END) AS SumaMD,
@@ -23,35 +29,47 @@ class AccountingEngine:
         if result and result[0][0] is not None:
             suma_md = result[0][0]
             suma_d = result[0][1]
+            # Zůstatek je MD - D
             zustatek = suma_md - suma_d
             return zustatek
         return 0.0
 
-    def get_pohyby_uctu(self, ucet: str) -> list[UcetniPohyb]:
-        # Původní kód je v pořádku
+    def get_pohyby_uctu(self, ucet: str):
+        """Načte detaily pohybů pro daný účet, včetně popisu a čísla dokladu."""
         sql_query = """
-        SELECT id, transakce_id, klient_id, ucet, smer, castka
-        FROM UcetniPohyby
-        WHERE klient_id = ? AND ucet = ?
-        ORDER BY id;
+        SELECT 
+            P.transakce_id, 
+            P.smer, 
+            P.castka, 
+            T.doklad_cislo,        -- Nově: Číslo dokladu
+            T.datum,               -- Nově: Datum transakce
+            T.popis,               -- Nově: Popis transakce
+            UR.nazev               -- Nově: Název účtu (i když je stejný)
+        FROM UcetniPohyby AS P
+        JOIN Transakce AS T ON P.transakce_id = T.id
+        JOIN UctovyRozvrh AS UR ON P.ucet = UR.ucet
+        WHERE P.klient_id = ? AND P.ucet = ?
+        ORDER BY T.datum DESC, P.id;
         """
-        raw_pohyby = execute_query(sql_query, (self.klient_id, ucet))
+        # Vrátíme obohacená data jako list of dicts, protože model UcetniPohyb je příliš jednoduchý
+        results = execute_query(sql_query, (self.klient_id, ucet))
 
-        pohyby = []
-        if raw_pohyby:
-            for row in raw_pohyby:
-                pohyby.append(UcetniPohyb(
-                    id=row[0],
-                    transakce_id=row[1],
-                    klient_id=row[2],
-                    ucet=row[3],
-                    smer=row[4],
-                    castka=float(row[5])
-                ))
-        return pohyby
+        pohyby_list = []
+        if results:
+            for row in results:
+                pohyby_list.append({
+                    'Transakce ID': row[0],
+                    'Směr': row[1],
+                    'Částka': float(row[2]),
+                    'Doklad Číslo': row[3],
+                    'Datum': row[4].strftime('%Y-%m-%d'),
+                    'Popis Transakce': row[5],
+                    'Název Účtu': row[6]
+                })
+        return pohyby_list
 
     def spocti_zustatky(self):
-        # Původní kód je v pořádku
+        # Ponecháno, v pořádku
         sql = """
         SELECT 
             ucet,
@@ -82,14 +100,13 @@ class AccountingEngine:
         results = execute_query(sql)
 
         sazby = {}
-        if results and results != []:  # Ošetření pro případ, že je tabulka prázdná
+        if results and results != []:
             for procento, ucet_vstup, ucet_vystup in results:
-                # Používáme float(procento) jako klíč
                 sazby[float(procento)] = {'vstup': ucet_vstup, 'vystup': ucet_vystup}
 
-        # Pokud je tabulka prázdná, defaultně vrátíme alespoň 0%
-        if not sazby:
-            sazby[0.00] = {'vstup': '343', 'vystup': '343'}
+        # Fallback pro případ, že DB není správně inicializována
+        if not sazby and 0.00 not in sazby:
+            sazby[0.00] = {'vstup': '343.1', 'vystup': '343.2'}
 
         return sazby
 
@@ -99,33 +116,45 @@ class AccountingEngine:
 
         # 0. PŘÍPRAVA DAT DPH
         castka_zaklad = float(castka_bez_dph)
+        castka_dph = 0.0
 
-        if smer_dph_popis == 'Neučtovat' or float(sazba_dph) == 0.0:
-            castka_dph = 0.0
-            ucet_dph = None
-        else:
+        if smer_dph_popis != 'Neučtovat' and float(sazba_dph) > 0.0:
+
             castka_dph = castka_zaklad * (float(sazba_dph) / 100)
-
             sazby_info = self.get_dph_sazby()
             info = sazby_info.get(float(sazba_dph))
 
             if not info:
-                # Pokud se nepodařilo najít info o účtech DPH (i přes 0.00 fallback)
-                raise ValueError(f"Neplatná nebo nenalezená sazba DPH: {sazba_dph}")
+                raise ValueError(f"Nenalezeny účty pro sazbu DPH: {sazba_dph}")
 
-            # Určení účtu DPH (Vstup=MD; Výstup=D)
+            # Určení účtu a směru DPH
             if smer_dph_popis == 'DPH na VSTUPU (MD)':
                 ucet_dph = info['vstup']
                 smer_dph = 'MD'
-                # Pohyb celkové částky (s DPH) na účet Dal
+                # Protipoložka, která nese celkem (např. 321) je na DAL
                 ucet_protipolozka = ucet_dal_zaklad
                 smer_protipolozka = 'D'
             else:  # DPH na VÝSTUPU (D)
                 ucet_dph = info['vystup']
                 smer_dph = 'D'
-                # Pohyb celkové částky (s DPH) na účet Má Dáti
+                # Protipoložka, která nese celkem (např. 221) je na MD
                 ucet_protipolozka = ucet_md_zaklad
-                smer_protipolozka = 'MD'
+                smer_protipolozka = 'MD' # <--- ZAJIŠTĚNO, ŽE JE DEFINOVÁNO VŽDY
+
+        else:
+            # Neúčtuje se DPH, transakce je jen na základní částku
+            castka_dph = 0.0
+            ucet_dph = None
+
+            # Nastavíme základní směr účtování (musí se vybrat jeden z MD/DAL)
+            # Předpoklad: Při nákupu je protipoložka D (závazek), při prodeji MD (banka/pohledávka)
+            if ucet_md_zaklad in ['511', '501']:  # Typický MD náklad
+                ucet_protipolozka = ucet_dal_zaklad  # 321, 221
+                smer_protipolozka = 'D' # <--- ZDE BYLO DEFINOVÁNO
+            else:  # Typický D výnos (602)
+                ucet_protipolozka = ucet_md_zaklad  # 221, 311
+                smer_protipolozka = 'MD' # <--- TOTO BYLO PŘIDÁNO!
+
 
         castka_celkem = castka_zaklad + castka_dph
 
@@ -146,26 +175,25 @@ class AccountingEngine:
                 sql_insert_and_get_id = sql_transakce + "SELECT SCOPE_IDENTITY();"
                 cursor.execute(sql_insert_and_get_id, (self.klient_id, datum, popis, doklad_cislo))
 
-                if cursor.nextset():
-                    transakce_id = cursor.fetchone()[0]
-                else:
-                    raise Exception("Nepodařilo se získat ID nově vložené transakce (SCOPE_IDENTITY selhalo).")
+                # Získání ID
+                cursor.nextset()
+                transakce_id = cursor.fetchone()[0]
 
                 # --- POHYBY ---
 
-                # 1. POHYB ZÁKLADU (Základní účet je protipólem protipoložky)
-                # Tj. pokud Celkem jde na DAL, Základ jde na MD (ucet_md_zaklad).
+                # 1. POHYB ZÁKLADU
+                # Určíme účet základu (ten, který NENÍ protipoložkou) a jeho směr (opak protipoložky)
                 ucet_zaklad = ucet_md_zaklad if smer_protipolozka == 'D' else ucet_dal_zaklad
                 smer_zaklad = 'MD' if smer_protipolozka == 'D' else 'D'
 
                 cursor.execute(sql_pohyb, (transakce_id, self.klient_id, ucet_zaklad, smer_zaklad, castka_zaklad))
 
                 # 2. POHYB DPH (Pokud se účtuje)
-                if castka_dph > 0 and smer_dph_popis != 'Neučtovat':
+                if castka_dph > 0 and ucet_dph:
                     cursor.execute(sql_pohyb, (transakce_id, self.klient_id, ucet_dph, smer_dph, castka_dph))
 
-                # 3. PROTIPOLOŽKA (Celková částka, která se platí/přijímá)
-                # Protipoložka je ta, která nenese základ ani DPH.
+                # 3. PROTIPOLOŽKA (Celková částka nebo Základ)
+                # Použijeme castka_celkem, i když DPH=0, protože castka_celkem = castka_zaklad + 0
                 cursor.execute(sql_pohyb,
                                (transakce_id, self.klient_id, ucet_protipolozka, smer_protipolozka, castka_celkem))
 
