@@ -361,26 +361,22 @@ def zobrazit_reporty():
     # Načtení dat
     data = engine.get_report_data(date_from, date_to)
 
-    # Zobrazení aktivního filtru
     if date_from and date_to:
-        lbl = f"Období: {date_from.strftime('%d.%m.%Y')} – {date_to.strftime('%d.%m.%Y')}"
+        st.caption(f"Období: {date_from.strftime('%d.%m.%Y')} – {date_to.strftime('%d.%m.%Y')}")
     else:
-        lbl = "Období: Kumulativně od počátku (Všechna data)"
-    st.caption(lbl)
+        st.caption("Období: Kumulativně od počátku")
 
     st.markdown("---")
 
-    # --- DEFINICE ZÁLOŽEK ---
-    tab_vysledovka, tab_rozvaha = st.tabs(["📉 Výsledovka (Zisk/Ztráta)", "⚖️ Rozvaha (Bilance)"])
+    # --- ZÁLOŽKY ---
+    tab_vysledovka, tab_rozvaha = st.tabs(["📉 Výsledovka", "⚖️ Rozvaha"])
 
     # =========================================================
-    # 1. VÝSLEDOVKA (Profit & Loss)
+    # 1. VÝSLEDOVKA (Zůstává stejná, jen pro úplnost)
     # =========================================================
     with tab_vysledovka:
         hv = data['hospodarsky_vysledek']
-
-        # --- HLAVNÍ KPI (BANNER) ---
-        barva_hv = "#28a745" if hv >= 0 else "#dc3545"  # Zelená / Červená
+        barva_hv = "#28a745" if hv >= 0 else "#dc3545"
         bg_hv = "rgba(40, 167, 69, 0.1)" if hv >= 0 else "rgba(220, 53, 69, 0.1)"
         label_hv = "ČISTÝ ZISK" if hv >= 0 else "ZTRÁTA"
 
@@ -388,96 +384,132 @@ def zobrazit_reporty():
             f"""
             <div style="background-color: {bg_hv}; padding: 15px; border-radius: 8px; border-left: 5px solid {barva_hv}; text-align: center; margin-bottom: 20px;">
                 <h4 style="margin:0; color: #888;">VÝSLEDEK HOSPODAŘENÍ ({label_hv})</h4>
-                <h1 style="margin:0; color: {barva_hv}; font-size: 2.5em;">{hv:,.2f} Kč</h1>
+                <h1 style="margin:0; color: {barva_hv}; font-size: 2.2em;">{hv:,.2f} Kč</h1>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-        # --- DVA SLOUPCE (NÁKLADY vs VÝNOSY) ---
         c1, c2 = st.columns(2)
 
-        # Levý sloupec: NÁKLADY
         with c1:
-            st.markdown(f"<h3 style='border-bottom: 2px solid #dc3545;'>Náklady</h3>", unsafe_allow_html=True)
-            # Metrika HNED pod nadpisem pro symetrii
-            st.metric("Celkem Náklady", f"{data['suma_naklady']:,.2f} Kč")
-
+            st.markdown(f"<h3 style='border-bottom: 3px solid #dc3545;'>Náklady</h3>", unsafe_allow_html=True)
+            st.markdown(f"<h2 style='color: #dc3545;'>{data['suma_naklady']:,.2f} Kč</h2>", unsafe_allow_html=True)
             if data['naklady']:
                 df = pd.DataFrame(data['naklady'])
                 df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
                 df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
+                df = df[['Účet', 'Název', 'Částka']]
                 st.dataframe(df, hide_index=True, use_container_width=True)
             else:
-                st.info("Žádné náklady v tomto období.")
+                st.info("Žádné náklady.")
 
-        # Pravý sloupec: VÝNOSY
         with c2:
-            st.markdown(f"<h3 style='border-bottom: 2px solid #28a745;'>Výnosy</h3>", unsafe_allow_html=True)
-            # Metrika HNED pod nadpisem
-            st.metric("Celkem Výnosy", f"{data['suma_vynosy']:,.2f} Kč")
-
+            st.markdown(f"<h3 style='border-bottom: 3px solid #28a745;'>Výnosy</h3>", unsafe_allow_html=True)
+            st.markdown(f"<h2 style='color: #28a745;'>{data['suma_vynosy']:,.2f} Kč</h2>", unsafe_allow_html=True)
             if data['vynosy']:
                 df = pd.DataFrame(data['vynosy'])
                 df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
                 df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
+                df = df[['Účet', 'Název', 'Částka']]
                 st.dataframe(df, hide_index=True, use_container_width=True)
             else:
-                st.info("Žádné výnosy v tomto období.")
+                st.info("Žádné výnosy.")
 
     # =========================================================
-    # 2. ROZVAHA (Balance Sheet)
+    # 2. ROZVAHA (VERTIKÁLNÍ DESIGN)
     # =========================================================
     with tab_rozvaha:
-
-        # --- KONTROLA BILANCE (BANNER) ---
         rozdil = data['suma_aktiva'] - data['suma_pasiva']
         bilance_ok = abs(rozdil) < 0.02
 
-        icon = "✅" if bilance_ok else "❌"
-        msg = "Bilanční rovnice je v pořádku (Aktiva = Pasiva)" if bilance_ok else f"NESHODA V BILANCI: Rozdíl {rozdil:,.2f} Kč!"
-        color_bil = "#28a745" if bilance_ok else "#dc3545"
+        if not bilance_ok:
+            st.error(f"⚠️ Neshoda v bilanci: Rozdíl {rozdil:,.2f} Kč")
+        else:
+            st.success("✅ Bilance je vyrovnaná.")
 
+        st.markdown("")
+
+        # -----------------------------------------------------
+        # SEKCE 1: AKTIVA (Modrá)
+        # -----------------------------------------------------
+        # Podtržení nadpisu modrou barvou (#007bff)
         st.markdown(
-            f"""
-            <div style="border: 1px solid {color_bil}; padding: 10px; border-radius: 5px; margin-bottom: 20px; color: {color_bil}; font-weight: bold; text-align: center;">
-                {icon} {msg}
-            </div>
-            """,
+            f"<h3 style='border-bottom: 3px solid #007bff; padding-bottom: 5px; margin-bottom: 10px;'>Aktiva (Majetek)</h3>",
             unsafe_allow_html=True
         )
 
-        # --- DVA SLOUPCE (AKTIVA vs PASIVA) ---
-        c_akt, c_pas = st.columns(2)
+        # Celková suma Aktiv
+        st.markdown(
+            f"<h1 style='color: #007bff; margin-top: 0px;'>{data['suma_aktiva']:,.2f} Kč</h1>",
+            unsafe_allow_html=True
+        )
 
-        # Levý: AKTIVA
-        with c_akt:
-            st.markdown(f"<h3 style='border-bottom: 2px solid #007bff;'>Aktiva (Majetek)</h3>", unsafe_allow_html=True)
-            st.metric("Celkem Aktiva", f"{data['suma_aktiva']:,.2f} Kč")
+        if data['aktiva']:
+            df = pd.DataFrame(data['aktiva'])
+            df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
+            df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
+            df_final = df[['Účet', 'Název', 'Částka']]
 
-            if data['aktiva']:
-                df = pd.DataFrame(data['aktiva'])
+            # Tabulka na celou šířku
+            st.dataframe(
+                df_final,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Účet": st.column_config.TextColumn("Účet", width="small"),
+                    "Název": st.column_config.TextColumn("Název", width="medium"),
+                    "Částka": st.column_config.TextColumn("Částka", width="small"),
+                }
+            )
+        else:
+            st.info("Žádná aktiva.")
+
+        # Mezera mezi sekcemi
+        st.markdown("<br><br>", unsafe_allow_html=True)
+
+        # -----------------------------------------------------
+        # SEKCE 2: PASIVA (Žlutá/Oranžová)
+        # -----------------------------------------------------
+        # Podtržení nadpisu žlutou barvou (#ffc107)
+        st.markdown(
+            f"<h3 style='border-bottom: 3px solid #ffc107; padding-bottom: 5px; margin-bottom: 10px;'>Pasiva (Zdroje)</h3>",
+            unsafe_allow_html=True
+        )
+
+        # Celková suma Pasiv
+        st.markdown(
+            f"<h1 style='color: #ffc107; margin-top: 0px;'>{data['suma_pasiva']:,.2f} Kč</h1>",
+            unsafe_allow_html=True
+        )
+
+        if data['pasiva']:
+            df = pd.DataFrame(data['pasiva'])
+
+            # --- FILTR: ODSTRANĚNÍ HV Z TABULKY ---
+            df = df[df['ucet'] != 'HV']
+            # ---------------------------------------
+
+            if not df.empty:
                 df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
                 df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
-                st.dataframe(df, hide_index=True, use_container_width=True, height=400)  # Fixní výška pro lepší vzhled
+                df_final = df[['Účet', 'Název', 'Částka']]
+
+                # Tabulka na celou šířku
+                st.dataframe(
+                    df_final,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Účet": st.column_config.TextColumn("Účet", width="small"),
+                        "Název": st.column_config.TextColumn("Název", width="medium"),
+                        "Částka": st.column_config.TextColumn("Částka", width="small"),
+                    }
+                )
             else:
-                st.info("Žádná aktiva k zobrazení.")
-
-        # Pravý: PASIVA
-        with c_pas:
-            st.markdown(f"<h3 style='border-bottom: 2px solid #ffc107;'>Pasiva (Zdroje)</h3>", unsafe_allow_html=True)
-            st.metric("Celkem Pasiva", f"{data['suma_pasiva']:,.2f} Kč")
-
-            if data['pasiva']:
-                df = pd.DataFrame(data['pasiva'])
-                df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
-                df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
-
-                # Zvýraznění řádku s Hospodářským výsledkem (pokud existuje)
-                st.dataframe(df, hide_index=True, use_container_width=True, height=400)
-            else:
-                st.info("Žádná pasiva k zobrazení.")
-
+                st.caption("Žádná pasiva (kromě HV).")
+        else:
+            st.caption("Žádná pasiva.")
 
 def zobrazit_prehled_uctu():
     st.header("Hlavní Přehled Účtů")
