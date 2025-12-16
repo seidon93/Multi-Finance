@@ -3,68 +3,122 @@ import os
 from datetime import date
 import streamlit as st
 import pandas as pd
+from datetime import date, timedelta
+from decimal import Decimal
 
 # Zajištění, že se importují moduly z nadřazeného adresáře (core)
 current_dir = os.path.dirname(os.path.abspath(__file__))
-# Oprava: sys.path.append(os.path.join(current_dir, '..')) je spolehlivější
 sys.path.append(os.path.join(current_dir, os.pardir))
 
 from dotenv import load_dotenv
-from core.accounting_logic import AccountingEngine
+
+
+# --- FAKE ENGINE PRO TESTOVÁNÍ KÓDU BEZ DATABÁZE (PRO VIZUALIZACI) ---
+class AccountingEngine:
+    """Simuluje klíčové metody pro ukázku UI."""
+
+    def __init__(self, klient_id):
+        pass
+
+    def get_dph_sazby(self):
+        return {21.0: {'vstup': '343.1.21', 'vystup': '343.2.21'}, 0.0: {'vstup': '343.1.00', 'vystup': '343.2.00'}}
+
+    def get_ucet_nazev(self, ucet):
+        return f"Název účtu {ucet}"
+
+    # TATO METODA JE NÁZVU, KTERÝ SE POUŽÍVÁ V KÓDU (spocitej_zustatky)
+    def spocitej_zustatky(self, datum_od=None, datum_do=None):
+        return {'221': 150000.0, '321': -126671.08, '511': 50000.0, '343.2.21': -21000.0}
+
+    def save_transakce(self, **kwargs):
+        return 123
+
+    def spocti_prehled_dph(self, datum_od=None, datum_do=None):
+        return {'CELKEM': Decimal('12500.00'),
+                21.0: {'vstup': Decimal('10000.00'), 'vystup': Decimal('22500.00'), 'rozdil': Decimal('12500.00')}}
+
+    def get_pohyby_uctu(self, ucet, datum_od=None, datum_do=None):
+        return [
+            {'Datum': date(2025, 12, 1), 'Doklad Číslo': 'F-100', 'Popis Transakce': 'Příjem faktury',
+             'Částka': -25000.00, 'Název Účtu': 'Banka'},
+            {'Datum': date(2025, 12, 10), 'Doklad Číslo': 'FV-01', 'Popis Transakce': 'Úhrada faktury',
+             'Částka': 15000.00, 'Název Účtu': 'Pokladna'}
+        ]
+
+
+# --- KONEC FAKE ENGINE ---
 
 load_dotenv()
 DB_PASSWORD = os.environ.get("DB_PASSWORD")
-
-# Předpokládáme, že ID klienta je prozatím 1
 KLIENT_ID = 1
-
-# Inicializace účetního enginu pro daného klienta (globálně)
 engine = AccountingEngine(klient_id=KLIENT_ID)
 
-# --- CSS STYLING (FIX BAREV S !important) ---
+# --- GLOBÁLNÍ CSS STYLING ---
 st.markdown(
     """
     <style>
-    /* Obecné styly pro mřížku (i když se teď nepoužívá, necháme je pro případné znovuzavedení) */
+    /* Obecné styly pro mřížku */
     [data-testid="stColumn"] {
         flex: 1 1 0% !important;
         min-width: 150px;
         max-width: 300px;
     }
 
-    /* Vizuální styly pro text v hlavičce Historie */
-    .zustatek-kladny {
-        color: #28a745 !important; /* Zelená (výnos/aktivum) */
-        font-size: 1.15em !important;
-        font-weight: bold !important;
-    }
-    .zustatek-zaporny {
-        color: #dc3545 !important; /* Červená (náklad/závazek) */
-        font-size: 1.15em !important;
-        font-weight: bold !important;
+    /* Vizuální styly pro text v hlavičce Historie a účty */
+    .zustatek-kladny { color: #28a745 !important; font-size: 1.15em !important; font-weight: bold !important; }
+    .zustatek-zaporny { color: #dc3545 !important; font-size: 1.15em !important; font-weight: bold !important; }
+    .ucet-nazev { color: #007bff !important; font-size: 1.25em !important; font-weight: bold !important; margin-bottom: 0px; }
+    p { margin-bottom: 5px; margin-top: 5px; }
+
+    /* --- PRAVIDLA PRO TLAČÍTKO RESET (ČERVENÁ BARVA - SPUŠTĚNO PŘES type="primary") --- */
+    /* Odstraněn margin-top, nahrazeno vertical_alignment v Pythonu */
+    div.stButton > button[kind="primary"] {
+        background-color: #A93226 !important; /* Tmavě červená */
+        color: white !important;
+        border-radius: 5px;
+        border: 1px solid #A93226 !important;
+        transition: background-color 0.2s ease;
     }
 
-    /* Barva pro název a číslo účtu v hlavičce detailu (Změněno na Tmavě modrou) */
-    .ucet-nazev {
-        color: #007bff !important; /* Tmavě modrá pro odlišení */
-        font-size: 1.25em !important; /* Mírně zvětšeno */
-        font-weight: bold !important;
-        margin-bottom: 0px; /* Přiblíží název k zůstatku */
+    div.stButton > button[kind="primary"]:hover {
+        background-color: #C0392B !important; 
+        color: white !important; 
+        border: 1px solid #C0392B !important;
+    }
+    div.stButton > button[kind="primary"]:active {
+        background-color: #8D2A1F !important; 
+        color: white !important; 
+        border: 1px solid #8D2A1F !important;
     }
 
-    /* Zajištění, že p tagy s textem účtu nezanechávají zbytečné mezery */
-    p {
-        margin-bottom: 5px; 
-        margin-top: 5px;
+    /* Fallback selektor pro starší verze Streamlit */
+    div.stButton > button[data-testid="baseButton-primary"] {
+        background-color: #A93226 !important;
+        border-color: #A93226 !important;
     }
 
+    /* --- PRAVIDLA PRO TLAČÍTKO 'CELÁ HISTORIE' (ZELENÁ) --- */
+    div.stButton > button[key*='filter_vse_r'] {
+        background-color: #27AE60 !important; /* Tmavě zelená */
+        color: white !important;
+        border: 1px solid #27AE60 !important;
+        transition: background-color 0.2s ease;
+    }
+    div.stButton > button[key*='filter_vse_r']:hover {
+        background-color: #2ECC71 !important;
+        border: 1px solid #2ECC71 !important;
+    }
+    div.stButton > button[key*='filter_vse_r']:active {
+        background-color: #1E8449 !important;
+        border: 1px solid #1E8449 !important;
+    }
     </style>
     """,
     unsafe_allow_html=True
 )
 
 
-# --- KONEC CSS STYLINGU ---
+# --- KONEC GLOBÁLNÍHO CSS ---
 
 
 def zobrazit_header():
@@ -143,18 +197,15 @@ def formular_nova_transakce():
                 st.exception(f"FATÁLNÍ CHYBA: {e}")
 
 
-# soubor: ui/app.py
-
 def zobrazit_prehled_uctu():
     st.header("Přehled Zůstatků na Účtech")
 
     # --- VLOŽENÍ ČASOVÉHO FILTRU ---
-    # Zde jsou získány proměnné date_from a date_to
     date_from, date_to = time_filter_ui()
     st.markdown("---")  # Oddělení filtru od přehledu
 
-    # Získání zůstatků s filtrem
-    zustatky_all = engine.spocti_zustatky(datum_od=date_from, datum_do=date_to)
+    # Získání zůstatků s filtrem (OPRAVENO: volá spocitej_zustatky)
+    zustatky_all = engine.spocitej_zustatky(datum_od=date_from, datum_do=date_to)
 
     # --- 1. SEZNAM SLEDOVANÝCH ÚČTŮ (FILTROVANÝ PŘEHLED) ---
     st.subheader("Přehled Sledovaných Účtů (Klíčová Analytika)")
@@ -191,8 +242,8 @@ def zobrazit_prehled_uctu():
     st.subheader("Syntetická Účetní Kniha (Všechny zůstatky)")
 
     if st.button("Obnovit Agregované Zůstatky"):
-        # VOLÁNÍ S FILTREM I ZDE
-        zustatky_data = engine.spocti_zustatky(datum_od=date_from, datum_do=date_to)
+        # VOLÁNÍ S FILTREM I ZDE (OPRAVENO: volá spocitej_zustatky)
+        zustatky_data = engine.spocitej_zustatky(datum_od=date_from, datum_do=date_to)
 
         if zustatky_data:
             zustatky_df = pd.DataFrame(
@@ -221,72 +272,113 @@ def zobrazit_prehled_uctu():
 
 
 def zobrazit_prehled_dph():
+    import pandas as pd
+    from decimal import Decimal  # Zajistit import Decimal, pokud není globální
+
     st.header("Daňová Povinnost DPH")
+
+    # 1. Získání časového filtru
     date_from, date_to = time_filter_ui()
     st.markdown("---")
 
-    if st.button("Vypočítat DPH Povinnost"):
-        dph_data = engine.spocti_prehled_dph(datum_od=date_from, datum_do=date_to)
-        celkem = dph_data.pop('CELKEM')
+    # --- Inicializace Session State pro DPH data ---
+    if 'dph_data' not in st.session_state:
+        st.session_state['dph_data'] = None
+    if 'dph_celkem' not in st.session_state:
+        st.session_state['dph_celkem'] = Decimal('0.0')
 
-        # --- Tabulka zůstatků po sazbách ---
-        st.subheader("Detailní Přehled po Sazbách")
+    # --- Logika pro automatický výpočet ---
 
-        detail_data = []
-        for sazba, data in dph_data.items():
+    # Uložení aktuálního filtru do stavu pro detekci změn
+    current_filter = (date_from, date_to)
+
+    # Detekce změny filtru nebo prvního načtení
+    if st.session_state.get('last_dph_filter') != current_filter:
+        st.session_state['last_dph_filter'] = current_filter
+
+        # Spustit výpočet pouze pokud jsou platná data
+        if date_from and date_to:
+            with st.spinner(f"Počítám DPH povinnost pro období od {date_from} do {date_to}..."):
+                dph_data = engine.spocti_prehled_dph(datum_od=date_from, datum_do=date_to)
+
+                # Uložit do stavu
+                st.session_state['dph_celkem'] = dph_data.pop('CELKEM', Decimal('0.0'))
+                st.session_state['dph_data'] = dph_data
+        else:
+            st.session_state['dph_data'] = None
+            st.session_state['dph_celkem'] = Decimal('0.0')
+
+    # --- Zobrazení výsledků ---
+
+    dph_data = st.session_state['dph_data']
+    celkem = st.session_state['dph_celkem']
+
+    if dph_data is None:
+        st.info("Vyberte prosím časové rozmezí pro výpočet DPH.")
+        return
+
+    # Dynamická hlavička pro období
+    st.info(f"Přehled DPH za období: **{date_from.strftime('%d.%m.%Y')} – {date_to.strftime('%d.%m.%Y')}**")
+
+    # --- Tabulka zůstatků po sazbách ---
+    st.subheader("Detailní Přehled po Sazbách")
+
+    detail_data = []
+
+    # Získání mapování účtů pro hlavičky tabulky
+    dph_ucty_map = engine.get_dph_sazby()
+
+    for sazba, data in dph_data.items():
+        if sazba != 'CELKEM':
             # Získání názvů analytických účtů pro lepší kontext
-            ucty_map = engine.get_dph_sazby()[sazba]
+            ucty_map = dph_ucty_map.get(sazba, {'vstup': 'N/A', 'vystup': 'N/A'})
+
+            # Zajištění, že všechny hodnoty jsou Decimal před vložením
+            vstup = data.get('vstup', Decimal('0.0'))
+            vystup = data.get('vystup', Decimal('0.0'))
+            rozdil = data.get('rozdil', Decimal('0.0'))
 
             detail_data.append({
                 'Sazba (%)': f"{sazba:.2f}",
-                f'DPH VSTUP ({ucty_map["vstup"]})': data['vstup'],
-                f'DPH VÝSTUP ({ucty_map["vystup"]})': data['vystup'],
-                'Rozdíl DPH (Závazek - Pohledávka)': data['rozdil']
+                f'DPH VSTUP ({ucty_map["vstup"]})': vstup,
+                f'DPH VÝSTUP ({ucty_map["vystup"]})': vystup,
+                'Rozdíl DPH (Závazek - Pohledávka)': rozdil
             })
 
+    if not detail_data:
+        st.warning("Nejsou nalezeny žádné DPH pohyby pro toto období.")
+
+    else:
         df_detail = pd.DataFrame(detail_data)
 
-        # --- OPRAVA: Odstranění NaN a Formátování ---
-        df_detail = df_detail.fillna(0.0)
+        # --- Formátování: Decimal to string ---
+        df_detail = df_detail.fillna(Decimal('0.0'))
 
         for col in df_detail.columns:
             if col not in ['Sazba (%)']:
+                # Používáme lambda s kontrolou typu, protože Decimal se formátuje přímo
                 df_detail[col] = df_detail[col].apply(lambda x: f'{x:,.2f} Kč')
 
-        # --- ZOBRAZENÍ: Odstranění indexu a roztažení ---
+        # --- ZOBRAZENÍ TABULKY ---
         st.dataframe(
             df_detail,
             hide_index=True,
             width='stretch'
         )
 
-        # --- Celková povinnost ---
-        st.subheader("Celková Daňová Povinnost")
+    # --- Celková povinnost ---
+    st.subheader("Celková Daňová Povinnost")
 
-        if celkem > 0:
-            typ = "NEDOPLATEK (K ÚHRADĚ)"
-            barva = "red"
-        elif celkem < 0:
-            typ = "PŘEPLATEK (K VRÁCENÍ)"
-            barva = "green"
-        else:
-            typ = "NULOVÁ POVINNOST"
-            barva = "blue"
-
-        st.markdown(
-            f"""
-            <div style='
-                padding: 10px; 
-                border: 2px solid {barva}; 
-                border-radius: 5px; 
-                text-align: center;
-            '>
-                <h4>{typ}</h4>
-                <h1>{celkem:,.2f} Kč</h1>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    # Barvy a text pro Celkovou Povinnost
+    if celkem > Decimal('0.005'):  # Použít malou toleranci pro Decimal porovnání
+        typ = "NEDOPLATEK (K ÚHRADĚ)"
+        barva = "red"
+    elif celkem < Decimal('-0.005'):
+        typ = "PŘEPLATEK (K VRÁCENÍ)"
+        barva = "green"
+    else:
+        typ = "NULOVÁ POVINNOST"
+        barva = "blue"
 
 
 def zobrazit_historii_uctu():
@@ -296,9 +388,10 @@ def zobrazit_historii_uctu():
 
     date_from, date_to = time_filter_ui()
 
+    # OPRAVENO: volá spocitej_zustatky
+    zustatky_all_filtrovane = engine.spocitej_zustatky(datum_od=None, datum_do=date_to)
+    zustatky_all_komplet = engine.spocitej_zustatky()
 
-    zustatky_all_filtrovane = engine.spocti_zustatky(datum_od=None, datum_do=date_to)
-    zustatky_all_komplet = engine.spocti_zustatky()
     seznam_uctu_s_pohybem = [ucet for ucet, zustatek in zustatky_all_komplet.items() if abs(zustatek) > 0.005]
     seznam_uctu_s_pohybem = sorted(seznam_uctu_s_pohybem)
 
@@ -370,11 +463,8 @@ def zobrazit_historii_uctu():
             st.info(f"Na účtu {ucet_k_zobrazeni} nebyly nalezeny žádné pohyby v období od {date_from} do {date_to}.")
 
 
-
-
 def time_filter_ui():
-    """Vykreslí tlačítka a výběr rozmezí pro filtrování času."""
-    st.markdown("---")  # Oddělovač
+    """Vykreslí tlačítka a výběr rozmezí ve stabilním layoutu (2 řádky s vizuálním zarovnáním)."""
     st.subheader("Filtrování časového rozmezí")
 
     dnes = date.today()
@@ -385,14 +475,13 @@ def time_filter_ui():
     if 'filter_date_to' not in st.session_state:
         st.session_state['filter_date_to'] = None
 
-    # --- Definice funkcí pro časové skoky (ZŮSTÁVÁ STEJNÁ) ---
+    # --- Definice funkcí pro časové skoky ---
     def set_dates(d_from, d_to):
         st.session_state['filter_date_from'] = d_from
         st.session_state['filter_date_to'] = d_to
-        st.rerun()
+        # Není třeba st.rerun(), protože st.date_input to spouští automaticky
 
     def get_start_of_week(d):
-        from datetime import timedelta
         return d - timedelta(days=d.weekday())
 
     def get_start_of_month(d):
@@ -401,66 +490,80 @@ def time_filter_ui():
     def get_start_of_year(d):
         return d.replace(month=1, day=1)
 
-    # --- PŘEHLEDNÁ MŘÍŽKA S FILTRY ---
-    # Řádek 1: Tlačítka pro rychlou volbu (4 sloupce stejné šířky)
-    col1, col2, col3, col4 = st.columns(4)
+    def get_last_week():
+        start_this_week = get_start_of_week(dnes)
+        end_last_week = start_this_week - timedelta(days=1)
+        start_last_week = get_start_of_week(end_last_week)
+        return start_last_week, end_last_week
 
-    # 1. Dnes
-    if col1.button("Dnes", key='filter_dnes'):
-        set_dates(dnes, dnes)
+    # --- HLAVNÍ KONTEJNER (Sjednocuje tlačítka i inputy do jednoho rámečku) ---
+    with st.container(border=True):
 
-    # 2. Aktuální Týden
-    if col2.button("Týden (Po - Dnes)", key='filter_tyden'):
-        start_week = get_start_of_week(dnes)
-        set_dates(start_week, dnes)
+        # --- ŘÁDEK 1: RYCHLÁ VOLBA (6 TLAČÍTEK) ---
+        col_dnes, col_tyden, col_minutyden, col_mesic, col_rok, col_vse = st.columns(6)
 
-    # 3. Aktuální Měsíc
-    if col3.button("Měsíc", key='filter_mesic'):
-        start_month = get_start_of_month(dnes)
-        set_dates(start_month, dnes)
+        # Používáme st.rerun() přímo v set_dates, takže můžeme tlačítka zjednodušit
+        if col_dnes.button("Dnes", key='filter_dnes_r1', use_container_width=True):
+            set_dates(dnes, dnes)
+            st.rerun()  # Přidání rerun pro okamžitou změnu filtru u tlačítek
+        if col_tyden.button("Tento týden", key='filter_tyden_r1', use_container_width=True):
+            start_week = get_start_of_week(dnes)
+            set_dates(start_week, dnes)
+            st.rerun()
+        if col_minutyden.button("Minulý týden", key='filter_minutyden_r1', use_container_width=True):
+            start_lw, end_lw = get_last_week()
+            set_dates(start_lw, end_lw)
+            st.rerun()
+        if col_mesic.button("Měsíc", key='filter_mesic_r1', use_container_width=True):
+            start_month = get_start_of_month(dnes)
+            set_dates(start_month, dnes)
+            st.rerun()
+        if col_rok.button("Aktuální rok", key='filter_rok_r1', use_container_width=True):
+            start_year = get_start_of_year(dnes)
+            set_dates(start_year, dnes)
+            st.rerun()
+        if col_vse.button("Celá historie", key='filter_vse_r1', use_container_width=True):
+            set_dates(None, None)
+            st.rerun()
 
-    # 4. Aktuální Rok
-    if col4.button("Rok", key='filter_rok'):
-        start_year = get_start_of_year(dnes)
-        set_dates(start_year, dnes)
+        # --- ODDĚLOVAČ UVNITŘ KONTEJNERU ---
+        st.markdown("---")
 
-    # Řádek 2: Ruční výběr rozmezí a Reset (Rozložení: Datum OD, Datum DO, Reset)
-    col_from, col_to, col_reset = st.columns([1, 1, 0.5])
+        # --- ŘÁDEK 2: RUČNÍ VÝBĚR A RESET ---
+        # vertical_alignment="bottom" zajistí, že tlačítko Reset bude dole zarovnané s inputy
+        # Nastavení poměrů sloupců: [1.2, 1.2, 0.7] (Datum OD, Datum DO, Reset)
+        col_from, col_to, col_reset = st.columns([1.2, 1.2, 0.7], vertical_alignment="bottom")
 
-    # 5. Kalendářní rozmezí OD
-    date_from_input = col_from.date_input(
-        "Datum OD",
-        value=st.session_state['filter_date_from'] if st.session_state['filter_date_from'] else None,
-        key='input_date_from'
-    )
-    # 6. Kalendářní rozmezí DO
-    date_to_input = col_to.date_input(
-        "Datum DO",
-        value=st.session_state['filter_date_to'] if st.session_state['filter_date_to'] else None,
-        key='input_date_to'
-    )
+        # Uložíme původní stav před změnou, abychom detekovali, zda uživatel input změnil
+        # Tím zabráníme zbytečnému rerun, pokud se pouze vybere stejná hodnota.
+        old_date_from = st.session_state['filter_date_from']
+        old_date_to = st.session_state['filter_date_to']
 
-    # 7. Reset
-    # Tlačítko se typicky centruje s políčky, aby to vypadalo dobře
-    # Použijeme vertikální mezeru nad tlačítkem pro zarovnání s date_input
-    col_reset.markdown("<br>", unsafe_allow_html=True)
-    if col_reset.button("Reset Filtru", key='filter_reset'):
-        set_dates(None, None)  # Zrušení filtru
+        date_from_input = col_from.date_input(
+            "Datum OD",
+            value=old_date_from if old_date_from else None,
+            key='input_date_from'
+        )
+        date_to_input = col_to.date_input(
+            "Datum DO",
+            value=old_date_to if old_date_to else None,
+            key='input_date_to'
+        )
 
-    st.markdown("---")  # Oddělovač
+        # Tlačítko Reset je typu 'primary' (červené díky CSS)
+        if col_reset.button("Reset Filtru", key='filter_reset', use_container_width=True, type="primary"):
+            set_dates(None, None)
+            st.rerun()
 
-    # --- Zpracování ručního výběru (ZŮSTÁVÁ STEJNÉ) ---
-
-    # Uložení ručně vybraných dat, pokud se změnila
-    if date_from_input != st.session_state['filter_date_from'] or date_to_input != st.session_state['filter_date_to']:
+    # --- Zpracování ručního výběru ---
+    # Pokud se hodnota v date_input změní, uložíme ji a Streamlit automaticky spustí rerun.
+    if date_from_input != old_date_from or date_to_input != old_date_to:
         st.session_state['filter_date_from'] = date_from_input
         st.session_state['filter_date_to'] = date_to_input
-        st.rerun()
+        # Není třeba st.rerun(), protože date_input to dělá za nás
 
-    # Vrátíme aktuálně platné filtry
     return st.session_state['filter_date_from'], st.session_state['filter_date_to']
 
-    st.markdown("---")  # Oddělovač
 
 # --- Hlavní spouštěcí smyčka Streamlit ---
 if __name__ == "__main__":
