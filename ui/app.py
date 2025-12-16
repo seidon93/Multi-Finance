@@ -88,7 +88,27 @@ st.markdown(
 )
 
 
-# --- KONEC CSS STYLINGU ---
+# --- POMOCNÁ FUNKCE PRO PŘEVOD MĚNY (VLOŽIT NA ZAČÁTEK SOUBORU) ---
+def parse_input_money(text_value):
+    """
+    Převede textový vstup (např. '1.5m', '100k', '50 000') na float.
+    """
+    if not text_value:
+        return 0.0
+
+    # Odstraníme mezery a převedeme na malé písmo
+    # Nahradíme čárku tečkou pro float konverzi
+    clean_val = str(text_value).replace(" ", "").replace(",", ".").lower().strip()
+
+    try:
+        if clean_val.endswith('k'):
+            return float(clean_val[:-1]) * 1_000
+        elif clean_val.endswith('m'):
+            return float(clean_val[:-1]) * 1_000_000
+        else:
+            return float(clean_val)
+    except ValueError:
+        return 0.0
 
 
 def zobrazit_header():
@@ -106,47 +126,81 @@ def zobrazit_header():
 def formular_nova_transakce():
     st.header("Vytvořit Novou Transakci")
 
-    with st.form("transakce_form"):
+    # 1. Načteme existující účty z databáze (aby uživatel nemohl zadat chybný)
+    seznam_uctu = engine.get_seznam_uctu()
+
+    if not seznam_uctu:
+        st.error("Nepodařilo se načíst Účtový rozvrh. Je databáze naplněna?")
+        # Fallback - pokud DB nic nevrátí, necháme tam alespoň prázdný list, aby aplikace nespadla
+        seznam_uctu = ["511", "321", "221"]
+
         # --- HLAVIČKA TRANSAKCE ---
-        col1, col2 = st.columns(2)
-        doklad_cislo = col1.text_input("Číslo Dokladu", value=f"FP-{KLIENT_ID}-")
-        datum_transakce = col2.date_input("Datum Transakce", value=date.today())
-        popis = st.text_area("Popis Transakce", placeholder="Popis účetní operace.")
+    col1, col2 = st.columns(2)
+    # Generujeme náhodnou příponu nebo necháme uživatele psát, ale upozorníme ho
+    doklad_cislo = col1.text_input("Číslo Dokladu (MUSÍ BÝT UNIKÁTNÍ!)",
+                                   value=f"FP-{KLIENT_ID}-{date.today().strftime('%Y%m%d')}")
+    datum_transakce = col2.date_input("Datum Transakce", value=date.today())
 
-        st.subheader("Účetní Pohyby Základu")
+    popis = st.text_area("Popis Transakce", placeholder="Popis účetní operace.")
 
-        # --- Pohyby Základu ---
-        col_zaklad, col_protipolozka = st.columns(2)
+    st.subheader("Účetní Pohyby Základu")
 
-        ucet_md_zaklad = col_zaklad.text_input("Účet MD (Základ / Celkem)", value="511")
-        ucet_dal_zaklad = col_protipolozka.text_input("Účet D (Základ / Celkem)", value="321")
-        castka_bez_dph = st.number_input("Částka ZÁKLADU (bez DPH)", min_value=0.01, format="%.2f")
+    # --- Pohyby Základu (Nyní přes Selectbox) ---
+    col_zaklad, col_protipolozka = st.columns(2)
 
-        st.subheader("Nastavení DPH")
+    # MD
+    vyber_md = col_zaklad.selectbox("Účet MD (Základ / Celkem)", options=seznam_uctu, index=0)
+    # Získání čistého čísla účtu (vše před pomlčkou)
+    ucet_md_zaklad = vyber_md.split(" - ")[0].strip()
 
-        # 1. Získání seznamu sazeb DPH
-        dph_sazby_dict = engine.get_dph_sazby()
-        dph_sazby_options = sorted(list(dph_sazby_dict.keys()), reverse=True)
+    # D
+    vyber_d = col_protipolozka.selectbox("Účet D (Základ / Celkem)", options=seznam_uctu,
+                                         index=min(1, len(seznam_uctu) - 1))
+    ucet_dal_zaklad = vyber_d.split(" - ")[0].strip()
 
-        # 2. Výběr Sazby
-        vybrana_sazba = st.selectbox(
-            "Sazba DPH (%)",
-            options=dph_sazby_options,
-            index=dph_sazby_options.index(0.00) if 0.00 in dph_sazby_options else 0
-        )
+    # --- ČÁSTKA S NÁHLEDEM ---
+    col_castka_input, col_castka_preview = st.columns([1, 1])
 
-        # 3. Směr pohybu DPH
-        smer_dph = st.radio(
-            "Směr DPH",
-            options=['Neučtovat', 'DPH na VSTUPU (MD)', 'DPH na VÝSTUPU (D)'],
-            horizontal=True
-        )
+    raw_castka = col_castka_input.text_input(
+        "Částka ZÁKLADU (bez DPH)",
+        value="",
+        placeholder="Např. 1.2m, 50k nebo 5000"
+    )
 
-        submitted = st.form_submit_button("Uložit Transakci")
+    castka_bez_dph = parse_input_money(raw_castka)
 
-        if submitted:
+    if castka_bez_dph > 0:
+        col_castka_preview.metric("Interpretovaná částka",
+                                  f"{castka_bez_dph:,.2f} Kč".replace(",", " ").replace(".", ","))
+    else:
+        col_castka_preview.write("")
+        col_castka_preview.caption("*(Zadejte částku)*")
+
+    st.subheader("Nastavení DPH")
+
+    dph_sazby_dict = engine.get_dph_sazby()
+    dph_sazby_options = sorted(list(dph_sazby_dict.keys()), reverse=True)
+
+    vybrana_sazba = st.selectbox(
+        "Sazba DPH (%)",
+        options=dph_sazby_options,
+        index=dph_sazby_options.index(0.00) if 0.00 in dph_sazby_options else 0
+    )
+
+    smer_dph = st.radio(
+        "Směr DPH",
+        options=['Neučtovat', 'DPH na VSTUPU (MD)', 'DPH na VÝSTUPU (D)'],
+        horizontal=True
+    )
+
+    st.markdown("---")
+
+    if st.button("Uložit Transakci", type="primary"):
+        # Validace
+        if castka_bez_dph <= 0:
+            st.error("Chyba: Částka musí být větší než 0.")
+        else:
             try:
-                # --- VOLÁNÍ METODY S KOMPLETNÍMI DATY ---
                 transakce_id = engine.save_transakce(
                     datum=datum_transakce,
                     popis=popis,
@@ -161,7 +215,7 @@ def formular_nova_transakce():
                 if transakce_id:
                     st.success(f"Transakce {doklad_cislo} úspěšně uložena s ID {transakce_id}.")
                 else:
-                    st.error("Chyba při ukládání transakce. Zkontrolujte logy (terminál).")
+                    st.error("Chyba při ukládání: Pravděpodobně duplicitní číslo dokladu.")
 
             except Exception as e:
                 st.exception(f"FATÁLNÍ CHYBA: {e}")

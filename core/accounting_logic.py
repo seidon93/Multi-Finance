@@ -11,6 +11,17 @@ class AccountingEngine:
     def __init__(self, klient_id):
         self.klient_id = klient_id
 
+    def get_seznam_uctu(self):
+        """Vrátí seznam všech účtů pro výběr ve formuláři (jako list stringů)."""
+        sql = "SELECT ucet, nazev FROM UctovyRozvrh ORDER BY ucet"
+        try:
+            results = execute_query(sql)
+            # Vrátí formát: "511 - Opravy a udržování"
+            return [f"{row[0]} - {row[1]}" for row in results]
+        except Exception as e:
+            print(f"Chyba při načítání účtů: {e}")
+            return []
+
     def get_ucet_nazev(self, ucet: str) -> str:
         """Načte název účtu z účtového rozvrhu."""
         sql = "SELECT nazev FROM UctovyRozvrh WHERE ucet = ?"
