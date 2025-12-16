@@ -192,9 +192,8 @@ class AccountingEngine:
     # ... (uvnitř třídy AccountingEngine) ...
 
     def spocti_prehled_dph(self, datum_od=None, datum_do=None):
-        # --- DEBUG START: Sledujte terminál ---
+        # --- DEBUG START ---
         print(f"\n=== DEBUG DPH START ===")
-        print(f"Voláno s filtry -> OD: {datum_od}, DO: {datum_do}")
 
         dph_sazby = self.get_dph_sazby()
         prehled = defaultdict(lambda: {'vstup': Decimal('0.0'), 'vystup': Decimal('0.0'), 'rozdil': Decimal('0.0')})
@@ -202,21 +201,21 @@ class AccountingEngine:
 
         vsechny_dph_ucty = []
         for sazba_dict in dph_sazby.values():
-            if sazba_dict['vstup']: vsechny_dph_ucty.append(sazba_dict['vstup'])
-            if sazba_dict['vystup']: vsechny_dph_ucty.append(sazba_dict['vystup'])
+            if sazba_dict['vstup']: vsechny_dph_ucty.append(sazba_dict['vstup'].strip())
+            if sazba_dict['vystup']: vsechny_dph_ucty.append(sazba_dict['vystup'].strip())
 
         vsechny_dph_ucty = list(set(filter(None, vsechny_dph_ucty)))
 
         if not vsechny_dph_ucty:
-            print("DEBUG: Žádné DPH účty nenalezeny.")
             return {'CELKEM': Decimal('0.0')}
 
+        # Přidáme % pro SQL LIKE
         ucet_patterns = [f"{u}%" for u in vsechny_dph_ucty]
         placeholders = " OR ".join(["P.ucet LIKE ?" for _ in ucet_patterns])
 
-        # SQL dotaz
+        # SQL s JOINem na Transakce kvůli datu
         sql = f"""
-            SELECT P.ucet, P.smer, P.castka, T.datum
+            SELECT P.ucet, P.smer, P.castka, T.datum, T.id
             FROM UcetniPohyby P
             JOIN Transakce T ON T.id = P.transakce_id
             WHERE P.klient_id = ? 
@@ -225,18 +224,15 @@ class AccountingEngine:
 
         params = [self.klient_id] + ucet_patterns
 
-        # Aplikace filtrů
         if datum_od:
             d_od = datum_od.strftime('%Y-%m-%d') if hasattr(datum_od, 'strftime') else datum_od
             sql += " AND T.datum >= ?"
             params.append(d_od)
-            print(f"DEBUG: Přidána podmínka OD >= {d_od}")
 
         if datum_do:
             d_do = datum_do.strftime('%Y-%m-%d') if hasattr(datum_do, 'strftime') else datum_do
             sql += " AND T.datum <= ?"
             params.append(d_do)
-            print(f"DEBUG: Přidána podmínka DO <= {d_do}")
 
         try:
             with Database() as conn:
@@ -244,26 +240,40 @@ class AccountingEngine:
                 cursor.execute(sql, tuple(params))
                 pohyby = cursor.fetchall()
 
-            print(f"DEBUG: Nalezeno řádků v DB: {len(pohyby)}")
-
-            # Pokud je počet řádků 0, znamená to, že filtr funguje správně (odfiltroval vše)
-            if len(pohyby) == 0:
-                print("DEBUG: Žádná data pro toto období -> vracím nuly.")
+            print(f"DEBUG: Nalezeno {len(pohyby)} relevantních řádků v DB.")
 
             for row in pohyby:
-                ucet = row[0]
-                smer = row[1]
-                # row[2] je částka, row[3] je datum (jen pro info)
+                # Načtení hodnot z DB a ořezání mezer
+                ucet = row[0].strip()
+                smer = row[1].strip().upper()  # Převedeme na velká písmena (MD/D)
                 raw_castka = row[2] if row[2] is not None else 0.0
                 castka_dec = Decimal(str(raw_castka))
+                transakce_id = row[4]
 
+                print(f"  -> Řádek ID {transakce_id}: Účet='{ucet}', Směr='{smer}', Částka={castka_dec}")
+
+                matched = False
                 for sazba, ucty in dph_sazby.items():
-                    if ucty['vstup'] and ucet.startswith(ucty['vstup']) and smer == 'MD':
+                    # Definice účtů z nastavení (také ořežeme)
+                    vstup_cfg = ucty['vstup'].strip() if ucty['vstup'] else None
+                    vystup_cfg = ucty['vystup'].strip() if ucty['vystup'] else None
+
+                    # LOGIKA PÁROVÁNÍ
+                    # MD = Vstup
+                    if vstup_cfg and ucet.startswith(vstup_cfg) and smer == 'MD':
                         prehled[sazba]['vstup'] += castka_dec
+                        matched = True
                         break
-                    elif ucty['vystup'] and ucet.startswith(ucty['vystup']) and smer == 'D':
+
+                    # D = Výstup (Zde je pravděpodobně problém)
+                    elif vystup_cfg and ucet.startswith(vystup_cfg) and smer == 'D':
                         prehled[sazba]['vystup'] += castka_dec
+                        matched = True
                         break
+
+                if not matched:
+                    print(
+                        f"     !!! POZOR: Tento řádek nebyl spárován! Zkontrolujte směr '{smer}' vs očekávaný 'D'/'MD'.")
 
             for sazba, data in prehled.items():
                 rozdil = data['vystup'] - data['vstup']
@@ -271,11 +281,11 @@ class AccountingEngine:
                 celkem_rozdil += rozdil
 
             prehled['CELKEM'] = celkem_rozdil
-            print(f"=== DEBUG DPH END (Celkem: {celkem_rozdil}) ===\n")
+            print(f"=== DEBUG END. Celkem: {celkem_rozdil} ===")
             return dict(prehled)
 
         except Exception as e:
-            print(f"CHYBA při výpočtu DPH: {e}")
+            print(f"CHYBA DPH: {e}")
             return {'CELKEM': Decimal('0.0')}
 
     # --- PŘEPRACOVANÁ METODA PRO UKLÁDÁNÍ TRANSAKCE (Nyní s DPH) ---
