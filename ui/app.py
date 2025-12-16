@@ -126,6 +126,13 @@ def zobrazit_header():
 def formular_nova_transakce():
     st.header("Vytvořit Novou Transakci")
 
+    # --- UPDATE DB TLAČÍTKO (Jen pro prvotní naplnění) ---
+    with st.expander("⚙️ Správa databáze"):
+        if st.button("Nahrát kompletní účtovou osnovu (cca 80 účtů)"):
+            zprava = engine.inicializuj_uctovy_rozvrh()
+            st.success(zprava)
+            # st.rerun() # Odkomentujte, pokud chcete hned refreshnout stránku
+
     # --- DEFINICE ÚČETNÍCH TŘÍD PRO VÝBĚR ---
     tridy_uctu = [
         "0 - Dlouhodobý majetek",
@@ -139,111 +146,97 @@ def formular_nova_transakce():
     ]
 
     # --- 1. HLAVIČKA DOKLADU ---
-    col1, col2 = st.columns(2)
-    # Generujeme unikátní číslo dokladu s datem, aby se předešlo chybě "Duplicate key"
+    c1, c2 = st.columns(2)
     default_doklad = f"FP-{KLIENT_ID}-{date.today().strftime('%Y%m%d')}"
-    doklad_cislo = col1.text_input("Číslo Dokladu", value=default_doklad)
-    datum_transakce = col2.date_input("Datum Transakce", value=date.today())
-
-    popis = st.text_area("Popis Transakce", placeholder="Např. Nákup materiálu, Faktura za služby...")
-
-    st.subheader("Účetní Pohyby")
-
-    # --- 2. VÝBĚR ÚČTŮ (Interaktivní: Třída -> Účet) ---
-    c_md, c_dal = st.columns(2)
-
-    # === Strana MD ===
-    with c_md:
-        st.markdown("**Strana MD (Má Dáti)**")
-        # Krok A: Výběr třídy
-        trida_md_sel = st.selectbox("Třída (MD)", tridy_uctu, key="trida_md")
-        prefix_md = trida_md_sel.split(" - ")[0]
-
-        # Krok B: Načtení účtů z DB
-        ucty_md_list = engine.get_ucty_podle_tridy(prefix_md)
-
-        if ucty_md_list:
-            vyber_md = st.selectbox("Účet (MD)", ucty_md_list, key="ucet_md")
-            ucet_md_zaklad = vyber_md.split(" - ")[0].strip()
-        else:
-            st.warning(f"Třída {prefix_md} je prázdná.")
-            ucet_md_zaklad = None
-
-    # === Strana D ===
-    with c_dal:
-        st.markdown("**Strana D (Dal)**")
-        # Krok A: Výběr třídy (Defaultně nastavíme třídu 3 - Dodavatelé)
-        trida_d_sel = st.selectbox("Třída (D)", tridy_uctu, index=3, key="trida_d")
-        prefix_d = trida_d_sel.split(" - ")[0]
-
-        # Krok B: Načtení účtů z DB
-        ucty_d_list = engine.get_ucty_podle_tridy(prefix_d)
-
-        if ucty_d_list:
-            vyber_d = st.selectbox("Účet (D)", ucty_d_list, key="ucet_d")
-            ucet_dal_zaklad = vyber_d.split(" - ")[0].strip()
-        else:
-            st.warning(f"Třída {prefix_d} je prázdná.")
-            ucet_dal_zaklad = None
+    doklad_cislo = c1.text_input("Číslo Dokladu", value=default_doklad)
+    datum_transakce = c2.date_input("Datum Transakce", value=date.today())
+    popis = st.text_area("Popis", placeholder="Popis účetní operace...")
 
     st.markdown("---")
 
-    # --- 3. CHYTRÉ ZADÁNÍ ČÁSTKY ---
-    col_castka_input, col_castka_preview = st.columns([1, 1])
+    # === PŘEPÍNAČ REŽIMU ZADÁVÁNÍ ===
+    manualni_rezim = st.checkbox("✍️ Zadat účty ručně (pro vlastní analytiku)", value=False)
 
-    # Textové pole místo čísla
-    raw_castka = col_castka_input.text_input(
-        "Částka ZÁKLADU (bez DPH)",
-        placeholder="Např. 1.5m, 100k, 5000"
-    )
+    c_md, c_dal = st.columns(2)
 
-    # Okamžitý převod
+    # --- LOGIKA PRO MD ---
+    with c_md:
+        st.subheader("MD (Má Dáti)")
+        if manualni_rezim:
+            ucet_md_zaklad = st.text_input("Číslo účtu MD", placeholder="např. 518.001")
+            nazev_md_manual = st.text_input("Název účtu MD (pro nový účet)", placeholder="Volitelné", key="n_md")
+        else:
+            # Výběrový režim
+            trida_md_sel = st.selectbox("Třída", tridy_uctu, key="t_md")
+            prefix_md = trida_md_sel.split(" - ")[0]
+            ucty_md_list = engine.get_ucty_podle_tridy(prefix_md)
+
+            if ucty_md_list:
+                vyber_md = st.selectbox("Účet", ucty_md_list, key="u_md")
+                ucet_md_zaklad = vyber_md.split(" - ")[0].strip()
+            else:
+                st.warning("Žádné účty.")
+                ucet_md_zaklad = None
+
+    # --- LOGIKA PRO D ---
+    with c_dal:
+        st.subheader("D (Dal)")
+        if manualni_rezim:
+            ucet_dal_zaklad = st.text_input("Číslo účtu D", placeholder="např. 321")
+            nazev_d_manual = st.text_input("Název účtu D (pro nový účet)", placeholder="Volitelné", key="n_d")
+        else:
+            # Výběrový režim (Defaultně třída 3 nebo 2)
+            trida_d_sel = st.selectbox("Třída", tridy_uctu, index=2, key="t_d")
+            prefix_d = trida_d_sel.split(" - ")[0]
+            ucty_d_list = engine.get_ucty_podle_tridy(prefix_d)
+
+            if ucty_d_list:
+                vyber_d = st.selectbox("Účet", ucty_d_list, key="u_d")
+                ucet_dal_zaklad = vyber_d.split(" - ")[0].strip()
+            else:
+                st.warning("Žádné účty.")
+                ucet_dal_zaklad = None
+
+    # --- ČÁSTKA A ZBYTEK ---
+    st.markdown("---")
+    col_castka, col_prev = st.columns([1, 1])
+    raw_castka = col_castka.text_input("Částka bez DPH", placeholder="1.2m, 50k")
     castka_bez_dph = parse_input_money(raw_castka)
-
-    # Zobrazení náhledu (jen pokud je zadáno)
     if castka_bez_dph > 0:
-        col_castka_preview.metric("Interpretovaná částka",
-                                  f"{castka_bez_dph:,.2f} Kč".replace(",", " ").replace(".", ","))
-    else:
-        col_castka_preview.write("")  # Prázdné místo
-        col_castka_preview.caption("*(Zadejte částku, např. '10k' pro 10 000)*")
+        col_prev.metric("Částka", f"{castka_bez_dph:,.2f} Kč".replace(",", " ").replace(".", ","))
 
-    # --- 4. DPH NASTAVENÍ ---
-    st.subheader("DPH")
     c_dph1, c_dph2 = st.columns(2)
-
-    dph_sazby_dict = engine.get_dph_sazby()
-    dph_options = sorted(list(dph_sazby_dict.keys()), reverse=True)
-
-    vybrana_sazba = c_dph1.selectbox("Sazba DPH", dph_options,
-                                     index=dph_options.index(0.0) if 0.0 in dph_options else 0)
+    dph_sazby = engine.get_dph_sazby()
+    dph_opts = sorted(list(dph_sazby.keys()), reverse=True)
+    vybrana_sazba = c_dph1.selectbox("DPH %", dph_opts, index=dph_opts.index(0.0) if 0.0 in dph_opts else 0)
     smer_dph = c_dph2.radio("Typ DPH", ['Neučtovat', 'DPH na VSTUPU (MD)', 'DPH na VÝSTUPU (D)'])
 
+    # --- ULOŽENÍ ---
     st.markdown("")
-
-    # --- 5. TLAČÍTKO ULOŽIT ---
     if st.button("Uložit Transakci", type="primary", use_container_width=True):
-        # Validace před uložením
         if castka_bez_dph <= 0:
-            st.error("Chyba: Zadejte platnou částku.")
+            st.error("Zadejte částku.")
         elif not ucet_md_zaklad or not ucet_dal_zaklad:
-            st.error("Chyba: Vyberte platné účty na obou stranách.")
+            st.error("Vyplňte oba účty.")
         else:
             try:
-                transakce_id = engine.save_transakce(
-                    datum=datum_transakce,
-                    popis=popis,
-                    doklad_cislo=doklad_cislo,
-                    ucet_md_zaklad=ucet_md_zaklad,
-                    ucet_dal_zaklad=ucet_dal_zaklad,
-                    castka_bez_dph=castka_bez_dph,
-                    sazba_dph=vybrana_sazba,
-                    smer_dph_popis=smer_dph
-                )
+                # 1. Pokud je manuální režim, zajistíme, že účty v DB existují
+                if manualni_rezim:
+                    n_md = nazev_md_manual if nazev_md_manual else "Ručně vytvořený účet"
+                    n_d = nazev_d_manual if nazev_d_manual else "Ručně vytvořený účet"
 
-                if transakce_id:
-                    st.success(f"✅ Transakce uložena! (ID {transakce_id})")
-                    st.info(f"Zaúčtováno: MD {ucet_md_zaklad} / D {ucet_dal_zaklad} | Částka: {castka_bez_dph:,.2f} Kč")
+                    engine.zajisti_existenci_uctu(ucet_md_zaklad, n_md)
+                    engine.zajisti_existenci_uctu(ucet_dal_zaklad, n_d)
+
+                # 2. Uložení
+                tid = engine.save_transakce(
+                    datum=datum_transakce, popis=popis, doklad_cislo=doklad_cislo,
+                    ucet_md_zaklad=ucet_md_zaklad, ucet_dal_zaklad=ucet_dal_zaklad,
+                    castka_bez_dph=castka_bez_dph, sazba_dph=vybrana_sazba, smer_dph_popis=smer_dph
+                )  # <--- ZDE BYLA CHYBA (DOPLNĚNA ZÁVORKA)
+
+                if tid:
+                    st.success(f"✅ Transakce uložena! (ID {tid})")
                 else:
                     st.error("❌ Chyba při ukládání (zkontrolujte duplicitu čísla dokladu).")
 
