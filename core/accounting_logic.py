@@ -11,6 +11,21 @@ class AccountingEngine:
     def __init__(self, klient_id):
         self.klient_id = klient_id
 
+    def get_ucty_podle_tridy(self, trida_prefix):
+        """
+        Vrátí seznam účtů, které začínají daným číslem (např. '2' pro třídu 2).
+        Vrací list stringů ve formátu: "221 - Běžný bankovní účet".
+        """
+        # Přidáme % pro SQL LIKE (např. '2%')
+        sql = "SELECT ucet, nazev FROM UctovyRozvrh WHERE ucet LIKE ? ORDER BY ucet"
+        try:
+            results = execute_query(sql, (f"{trida_prefix}%",))
+            if not results:
+                return []
+            return [f"{row[0]} - {row[1]}" for row in results]
+        except Exception as e:
+            print(f"Chyba při načítání účtů třídy {trida_prefix}: {e}")
+            return []
     def get_seznam_uctu(self):
         """Vrátí seznam všech účtů pro výběr ve formuláři (jako list stringů)."""
         sql = "SELECT ucet, nazev FROM UctovyRozvrh ORDER BY ucet"

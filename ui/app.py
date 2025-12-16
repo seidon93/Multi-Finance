@@ -126,79 +126,108 @@ def zobrazit_header():
 def formular_nova_transakce():
     st.header("Vytvořit Novou Transakci")
 
-    # 1. Načteme existující účty z databáze (aby uživatel nemohl zadat chybný)
-    seznam_uctu = engine.get_seznam_uctu()
+    # --- DEFINICE ÚČETNÍCH TŘÍD PRO VÝBĚR ---
+    tridy_uctu = [
+        "0 - Dlouhodobý majetek",
+        "1 - Zásoby",
+        "2 - Krát. fin. majetek a pen. prostředky",
+        "3 - Zúčtovací vztahy",
+        "4 - Kapitálové účty a dlouhodobé závazky",
+        "5 - Náklady",
+        "6 - Výnosy",
+        "7 - Závěrkové a podrozvahové účty",
+    ]
 
-    if not seznam_uctu:
-        st.error("Nepodařilo se načíst Účtový rozvrh. Je databáze naplněna?")
-        # Fallback - pokud DB nic nevrátí, necháme tam alespoň prázdný list, aby aplikace nespadla
-        seznam_uctu = ["511", "321", "221"]
-
-        # --- HLAVIČKA TRANSAKCE ---
+    # --- 1. HLAVIČKA DOKLADU ---
     col1, col2 = st.columns(2)
-    # Generujeme náhodnou příponu nebo necháme uživatele psát, ale upozorníme ho
-    doklad_cislo = col1.text_input("Číslo Dokladu (MUSÍ BÝT UNIKÁTNÍ!)",
-                                   value=f"FP-{KLIENT_ID}-{date.today().strftime('%Y%m%d')}")
+    # Generujeme unikátní číslo dokladu s datem, aby se předešlo chybě "Duplicate key"
+    default_doklad = f"FP-{KLIENT_ID}-{date.today().strftime('%Y%m%d')}"
+    doklad_cislo = col1.text_input("Číslo Dokladu", value=default_doklad)
     datum_transakce = col2.date_input("Datum Transakce", value=date.today())
 
-    popis = st.text_area("Popis Transakce", placeholder="Popis účetní operace.")
+    popis = st.text_area("Popis Transakce", placeholder="Např. Nákup materiálu, Faktura za služby...")
 
-    st.subheader("Účetní Pohyby Základu")
+    st.subheader("Účetní Pohyby")
 
-    # --- Pohyby Základu (Nyní přes Selectbox) ---
-    col_zaklad, col_protipolozka = st.columns(2)
+    # --- 2. VÝBĚR ÚČTŮ (Interaktivní: Třída -> Účet) ---
+    c_md, c_dal = st.columns(2)
 
-    # MD
-    vyber_md = col_zaklad.selectbox("Účet MD (Základ / Celkem)", options=seznam_uctu, index=0)
-    # Získání čistého čísla účtu (vše před pomlčkou)
-    ucet_md_zaklad = vyber_md.split(" - ")[0].strip()
+    # === Strana MD ===
+    with c_md:
+        st.markdown("**Strana MD (Má Dáti)**")
+        # Krok A: Výběr třídy
+        trida_md_sel = st.selectbox("Třída (MD)", tridy_uctu, key="trida_md")
+        prefix_md = trida_md_sel.split(" - ")[0]
 
-    # D
-    vyber_d = col_protipolozka.selectbox("Účet D (Základ / Celkem)", options=seznam_uctu,
-                                         index=min(1, len(seznam_uctu) - 1))
-    ucet_dal_zaklad = vyber_d.split(" - ")[0].strip()
+        # Krok B: Načtení účtů z DB
+        ucty_md_list = engine.get_ucty_podle_tridy(prefix_md)
 
-    # --- ČÁSTKA S NÁHLEDEM ---
+        if ucty_md_list:
+            vyber_md = st.selectbox("Účet (MD)", ucty_md_list, key="ucet_md")
+            ucet_md_zaklad = vyber_md.split(" - ")[0].strip()
+        else:
+            st.warning(f"Třída {prefix_md} je prázdná.")
+            ucet_md_zaklad = None
+
+    # === Strana D ===
+    with c_dal:
+        st.markdown("**Strana D (Dal)**")
+        # Krok A: Výběr třídy (Defaultně nastavíme třídu 3 - Dodavatelé)
+        trida_d_sel = st.selectbox("Třída (D)", tridy_uctu, index=3, key="trida_d")
+        prefix_d = trida_d_sel.split(" - ")[0]
+
+        # Krok B: Načtení účtů z DB
+        ucty_d_list = engine.get_ucty_podle_tridy(prefix_d)
+
+        if ucty_d_list:
+            vyber_d = st.selectbox("Účet (D)", ucty_d_list, key="ucet_d")
+            ucet_dal_zaklad = vyber_d.split(" - ")[0].strip()
+        else:
+            st.warning(f"Třída {prefix_d} je prázdná.")
+            ucet_dal_zaklad = None
+
+    st.markdown("---")
+
+    # --- 3. CHYTRÉ ZADÁNÍ ČÁSTKY ---
     col_castka_input, col_castka_preview = st.columns([1, 1])
 
+    # Textové pole místo čísla
     raw_castka = col_castka_input.text_input(
         "Částka ZÁKLADU (bez DPH)",
-        value="",
-        placeholder="Např. 1.2m, 50k nebo 5000"
+        placeholder="Např. 1.5m, 100k, 5000"
     )
 
+    # Okamžitý převod
     castka_bez_dph = parse_input_money(raw_castka)
 
+    # Zobrazení náhledu (jen pokud je zadáno)
     if castka_bez_dph > 0:
         col_castka_preview.metric("Interpretovaná částka",
                                   f"{castka_bez_dph:,.2f} Kč".replace(",", " ").replace(".", ","))
     else:
-        col_castka_preview.write("")
-        col_castka_preview.caption("*(Zadejte částku)*")
+        col_castka_preview.write("")  # Prázdné místo
+        col_castka_preview.caption("*(Zadejte částku, např. '10k' pro 10 000)*")
 
-    st.subheader("Nastavení DPH")
+    # --- 4. DPH NASTAVENÍ ---
+    st.subheader("DPH")
+    c_dph1, c_dph2 = st.columns(2)
 
     dph_sazby_dict = engine.get_dph_sazby()
-    dph_sazby_options = sorted(list(dph_sazby_dict.keys()), reverse=True)
+    dph_options = sorted(list(dph_sazby_dict.keys()), reverse=True)
 
-    vybrana_sazba = st.selectbox(
-        "Sazba DPH (%)",
-        options=dph_sazby_options,
-        index=dph_sazby_options.index(0.00) if 0.00 in dph_sazby_options else 0
-    )
+    vybrana_sazba = c_dph1.selectbox("Sazba DPH", dph_options,
+                                     index=dph_options.index(0.0) if 0.0 in dph_options else 0)
+    smer_dph = c_dph2.radio("Typ DPH", ['Neučtovat', 'DPH na VSTUPU (MD)', 'DPH na VÝSTUPU (D)'])
 
-    smer_dph = st.radio(
-        "Směr DPH",
-        options=['Neučtovat', 'DPH na VSTUPU (MD)', 'DPH na VÝSTUPU (D)'],
-        horizontal=True
-    )
+    st.markdown("")
 
-    st.markdown("---")
-
-    if st.button("Uložit Transakci", type="primary"):
-        # Validace
+    # --- 5. TLAČÍTKO ULOŽIT ---
+    if st.button("Uložit Transakci", type="primary", use_container_width=True):
+        # Validace před uložením
         if castka_bez_dph <= 0:
-            st.error("Chyba: Částka musí být větší než 0.")
+            st.error("Chyba: Zadejte platnou částku.")
+        elif not ucet_md_zaklad or not ucet_dal_zaklad:
+            st.error("Chyba: Vyberte platné účty na obou stranách.")
         else:
             try:
                 transakce_id = engine.save_transakce(
@@ -213,9 +242,10 @@ def formular_nova_transakce():
                 )
 
                 if transakce_id:
-                    st.success(f"Transakce {doklad_cislo} úspěšně uložena s ID {transakce_id}.")
+                    st.success(f"✅ Transakce uložena! (ID {transakce_id})")
+                    st.info(f"Zaúčtováno: MD {ucet_md_zaklad} / D {ucet_dal_zaklad} | Částka: {castka_bez_dph:,.2f} Kč")
                 else:
-                    st.error("Chyba při ukládání: Pravděpodobně duplicitní číslo dokladu.")
+                    st.error("❌ Chyba při ukládání (zkontrolujte duplicitu čísla dokladu).")
 
             except Exception as e:
                 st.exception(f"FATÁLNÍ CHYBA: {e}")
