@@ -168,11 +168,12 @@ def formular_nova_transakce():
 
 
 def time_filter_ui():
-    """Vykreslí tlačítka a výběr rozmezí ve stabilním layoutu v kontejneru."""
+    """Vykreslí tlačítka a výběr rozmezí včetně ČTVRTLETÍ."""
 
     st.subheader("Filtrování časového rozmezí")
 
     dnes = date.today()
+    aktualni_rok = dnes.year
 
     # Uložení stavu vybraných dat do session state
     if 'filter_date_from' not in st.session_state:
@@ -180,69 +181,96 @@ def time_filter_ui():
     if 'filter_date_to' not in st.session_state:
         st.session_state['filter_date_to'] = None
 
-    # --- Definice funkcí pro časové skoky ---
+    # --- Pomocná funkce pro nastavení a reload ---
     def set_dates(d_from, d_to):
         st.session_state['filter_date_from'] = d_from
         st.session_state['filter_date_to'] = d_to
         st.rerun()
 
+    # --- Pomocné výpočty dat ---
     def get_start_of_week(d):
         return d - timedelta(days=d.weekday())
 
     def get_start_of_month(d):
         return d.replace(day=1)
 
+    # Funkce pro konec měsíce
+    def get_end_of_month(d):
+        # První den dalšího měsíce - 1 den
+        next_month = d.replace(day=28) + timedelta(days=4)
+        return next_month - timedelta(days=next_month.day)
+
     def get_start_of_year(d):
         return d.replace(month=1, day=1)
+
+    def get_end_of_year(d):
+        return d.replace(month=12, day=31)
 
     # --- KONTEJNER PRO FILTRY ---
     with st.container(border=True):
 
-        # Řádek 1: Rychlá volba (4 sloupce)
-        col_dnes, col_tyden, col_mesic, col_rok = st.columns(4)
+        # Řádek 1: Základní rychlá volba
+        c1, c2, c3, c4 = st.columns(4)
 
-        if col_dnes.button("Dnes", key='filter_dnes', use_container_width=True):
+        if c1.button("Dnes", use_container_width=True):
             set_dates(dnes, dnes)
 
-        if col_tyden.button("Tento týden", key='filter_tyden', use_container_width=True):
+        if c2.button("Tento týden", use_container_width=True):
             start_week = get_start_of_week(dnes)
-            set_dates(start_week, dnes)
+            end_week = start_week + timedelta(days=6)
+            set_dates(start_week, end_week)
 
-        if col_mesic.button("Tento měsíc", key='filter_mesic', use_container_width=True):
+        if c3.button("Tento měsíc", use_container_width=True):
             start_month = get_start_of_month(dnes)
-            set_dates(start_month, dnes)
+            end_month = get_end_of_month(dnes)
+            set_dates(start_month, end_month)
 
-        if col_rok.button("Tento rok", key='filter_rok', use_container_width=True):
-            start_year = get_start_of_year(dnes)
-            set_dates(start_year, dnes)
+        if c4.button("Tento rok", use_container_width=True):
+            set_dates(get_start_of_year(dnes), get_end_of_year(dnes))
 
-        st.markdown("")  # Malá mezera
+        # --- NOVÉ: Řádek 2: Čtvrtletí ---
+        q1, q2, q3, q4 = st.columns(4)
 
-        # Řádek 2: Ruční výběr a Reset
+        # 1. Čtvrtletí (leden - březen)
+        if q1.button("1. Čtvrtletí (Q1)", use_container_width=True):
+            set_dates(date(aktualni_rok, 1, 1), date(aktualni_rok, 3, 31))
+
+        # 2. Čtvrtletí (duben - červen)
+        if q2.button("2. Čtvrtletí (Q2)", use_container_width=True):
+            set_dates(date(aktualni_rok, 4, 1), date(aktualni_rok, 6, 30))
+
+        # 3. Čtvrtletí (červenec - září)
+        if q3.button("3. Čtvrtletí (Q3)", use_container_width=True):
+            set_dates(date(aktualni_rok, 7, 1), date(aktualni_rok, 9, 30))
+
+        # 4. Čtvrtletí (říjen - prosinec)
+        if q4.button("4. Čtvrtletí (Q4)", use_container_width=True):
+            set_dates(date(aktualni_rok, 10, 1), date(aktualni_rok, 12, 31))
+
+
+        # Řádek 3: Ruční výběr a Reset
         col_from, col_to, col_reset = st.columns([1.2, 1.2, 0.7], vertical_alignment="bottom")
 
         new_date_from = col_from.date_input(
             "Datum OD",
             value=st.session_state['filter_date_from'],
-            key='picker_from'  # Unikátní klíč
+            key='picker_from'
         )
 
         new_date_to = col_to.date_input(
             "Datum DO",
             value=st.session_state['filter_date_to'],
-            key='picker_to'  # Unikátní klíč
+            key='picker_to'
         )
 
-        if col_reset.button("Reset", type="primary"):
-            st.session_state['filter_date_from'] = None
-            st.session_state['filter_date_to'] = None
-            st.rerun()
+        if col_reset.button("Reset filtrů", type="primary", use_container_width=True):
+            set_dates(None, None)
 
-        # Logika aktualizace state
+        # Logika aktualizace při ruční změně
         if new_date_from != st.session_state['filter_date_from'] or new_date_to != st.session_state['filter_date_to']:
             st.session_state['filter_date_from'] = new_date_from
             st.session_state['filter_date_to'] = new_date_to
-            st.rerun()  # Vynutí znovunačtení dat z DB s novými daty
+            st.rerun()
 
         return st.session_state['filter_date_from'], st.session_state['filter_date_to']
 
