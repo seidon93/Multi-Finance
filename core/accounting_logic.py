@@ -4,6 +4,7 @@ from core.models import UcetniPohyb
 from decimal import Decimal
 import pandas as pd
 
+
 class AccountingEngine:
     """Třída pro výpočet účetních dat a reportů."""
 
@@ -111,24 +112,28 @@ class AccountingEngine:
         """
         Spočítá zůstatky všech účtů k danému datu (datum_do).
         Zůstatek je kumulativní (počítá se od počátku historie do datum_do).
-
         datum_od se ignoruje, protože zůstatek je vždy kumulativní.
         """
-        zustatky = defaultdict(Decimal)
+        zustatky = defaultdict(float)
         # Základní SQL dotaz pro kumulativní součty
         sql = """
-            SELECT 
-                P.ucet,
-                SUM(CASE WHEN P.smer = 'MD' THEN P.castka ELSE 0 END) AS SumaMD,
-                SUM(CASE WHEN P.smer = 'D' THEN P.castka ELSE 0 END) AS SumaD
-            FROM UcetniPohyby P
-            JOIN Transakce T ON T.id = P.transakce_id  -- JOIN pro přístup k datu
-            WHERE P.klient_id = ?
-            """
+                SELECT 
+                    P.ucet,
+                    SUM(CASE WHEN P.smer = 'MD' THEN P.castka ELSE 0 END) AS SumaMD,
+                    SUM(CASE WHEN P.smer = 'D' THEN P.castka ELSE 0 END) AS SumaD
+                FROM UcetniPohyby P
+                JOIN Transakce T ON T.id = P.transakce_id
+                WHERE P.klient_id = ?
+                """
 
         params = [self.klient_id]
 
         # --- APLIKACE FILTRU K DATU (datum_do) ---
+        if datum_od:
+            datum_od_str = datum_od.strftime('%Y-%m-%d') if hasattr(datum_od, 'strftime') else datum_od
+            sql += " AND T.datum >= ?"
+            params.append(datum_od_str)
+
         if datum_do:
             # Přidáme podmínku, že datum z tabulky T (Transakce) musí být menší nebo rovno
             datum_do_str = datum_do.strftime('%Y-%m-%d') if hasattr(datum_do, 'strftime') else datum_do
@@ -180,13 +185,8 @@ class AccountingEngine:
     def spocti_prehled_dph(self, datum_od=None, datum_do=None):
         """
         Spočítá souhrnnou daňovou povinnost DPH pro dané období.
-
         Vyhledává pohyby na všech DPH účtech (definovaných v sazbách)
         a sčítá jejich hodnoty v rámci zvoleného časového rozmezí.
-
-        Parametry:
-        - datum_od (date/str): Počáteční datum období (včetně).
-        - datum_do (date/str): Koncové datum období (včetně).
         """
         dph_sazby = self.get_dph_sazby()
         prehled = defaultdict(lambda: {'vstup': Decimal('0.0'), 'vystup': Decimal('0.0'), 'rozdil': Decimal('0.0')})
@@ -195,89 +195,82 @@ class AccountingEngine:
         # Shromáždíme všechny DPH účty pro SQL dotaz
         vsechny_dph_ucty = []
         for sazba_dict in dph_sazby.values():
-            vsechny_dph_ucty.append(sazba_dict['vstup'])
-            vsechny_dph_ucty.append(sazba_dict['vystup'])
+            if sazba_dict['vstup']: vsechny_dph_ucty.append(sazba_dict['vstup'])
+            if sazba_dict['vystup']: vsechny_dph_ucty.append(sazba_dict['vystup'])
 
-        # Odstranění prázdných hodnot a duplicit
-        vsechny_dph_ucty = list(set(ucet for ucet in vsechny_dph_ucty if ucet))
+        # Odstranění duplicit a None hodnot
+        vsechny_dph_ucty = list(set(filter(None, vsechny_dph_ucty)))
 
         if not vsechny_dph_ucty:
             # Pokud nejsou definovány DPH účty, vrátíme nulu
             return {'CELKEM': 0.0}
 
         # Sestavení klauzule WHERE pro DPH účty (Používáme LIKE pro pokrytí analytik, např. 343.1%)
-        ucet_patterns = [ucet + '%' for ucet in vsechny_dph_ucty]
-        dph_ucet_where = " OR ".join([f"ucet LIKE ?" for _ in ucet_patterns])
+        ucet_patterns = [f"{u}%" for u in vsechny_dph_ucty]
+        placeholders = " OR ".join(["P.ucet LIKE ?" for _ in ucet_patterns])
 
         sql = f"""
-            SELECT 
-                P.ucet, 
-                P.smer, 
-                P.castka, 
-                T.datum  -- Zde bereme datum z tabulky T
-            FROM UcetniPohyby P
-            JOIN Transakce T ON T.id = P.transakce_id  -- Přidán JOIN!
-            WHERE P.klient_id = ? 
-            AND ({dph_ucet_where})
-            """
+                SELECT 
+                    P.ucet, 
+                    P.smer, 
+                    P.castka
+                FROM UcetniPohyby P
+                JOIN Transakce T ON T.id = P.transakce_id
+                WHERE P.klient_id = ? 
+                AND ({placeholders})
+                """
 
         params = [self.klient_id] + ucet_patterns
 
         # --- APLIKACE ČASOVÉHO FILTRU ---
         if datum_od:
-            datum_od_str = datum_od.strftime('%Y-%m-%d') if hasattr(datum_od, 'strftime') else datum_od
-            sql += " AND T.datum >= ?"  # Používáme T.datum
-            params.append(datum_od_str)
+            d_od = datum_od.strftime('%Y-%m-%d') if hasattr(datum_od, 'strftime') else datum_od
+            sql += " AND T.datum >= ?"
+            params.append(d_od)
 
         if datum_do:
-            datum_do_str = datum_do.strftime('%Y-%m-%d') if hasattr(datum_do, 'strftime') else datum_do
-            sql += " AND T.datum <= ?"  # Používáme T.datum
-            params.append(datum_do_str)
-        # --- KONEC ČASOVÉHO FILTRU ---
+            d_do = datum_do.strftime('%Y-%m-%d') if hasattr(datum_do, 'strftime') else datum_do
+            sql += " AND T.datum <= ?"
+            params.append(d_do)
 
         try:
-            # Předpoklad: Database() je správný kontextový manažer pro databázi
             with Database() as conn:
                 cursor = conn.cursor()
                 cursor.execute(sql, tuple(params))
                 pohyby = cursor.fetchall()
 
-            # Nyní projdeme pohyby a přiřadíme je ke správné sazbě DPH
-            for ucet, smer, castka, datum in pohyby:
-                sazba_match = None
-                dph_typ = None  # 'vstup' nebo 'vystup'
+            # Agregace výsledků v Pythonu (flexibilnější než složité SQL CASE statementy)
+            for ucet, smer, castka in pohyby:
+                castka_dec = Decimal(str(castka))  # Bezpečný převod na Decimal
 
-                # Určení sazby DPH na základě účtu
+                # Najdeme, do jaké sazby a typu (vstup/výstup) tento účet patří
+                found = False
                 for sazba, ucty in dph_sazby.items():
-                    if ucty['vstup'] and ucet.startswith(ucty['vstup']):
-                        sazba_match = sazba
-                        dph_typ = 'vstup'
+                    # Kontrola VSTUPU (např. 343.100 startswith 343.1)
+                    if ucty['vstup'] and ucet.startswith(ucty['vstup']) and smer == 'MD':
+                        prehled[sazba]['vstup'] += castka_dec
+                        found = True
                         break
-                    elif ucty['vystup'] and ucet.startswith(ucty['vystup']):
-                        sazba_match = sazba
-                        dph_typ = 'vystup'
+                    # Kontrola VÝSTUPU
+                    elif ucty['vystup'] and ucet.startswith(ucty['vystup']) and smer == 'D':
+                        prehled[sazba]['vystup'] += castka_dec
+                        found = True
                         break
 
-                if sazba_match is not None:
-                    # Sčítáme MD na vstupu (Pohledávka) a D na výstupu (Závazek)
-                    # Ostatní pohyby (např. storno) se pro účely zjednodušeného přehledu DPH ignorují.
-                    if dph_typ == 'vstup' and smer == 'MD':
-                        prehled[sazba_match]['vstup'] += castka
-                    elif dph_typ == 'vystup' and smer == 'D':
-                        prehled[sazba_match]['vystup'] += castka
+                # Pokud účet nebyl nalezen v konfiguraci (např. ruční účtování na špatnou analytiku), ignorujeme ho nebo logujeme
 
-            # Vypočítáme rozdíl a celkovou povinnost
+            # Finální výpočet rozdílů
             for sazba, data in prehled.items():
-                # Rozdíl = VÝSTUP (Závazek) - VSTUP (Pohledávka)
-                rozdil = data['vystup'] - data['vstup']
-                data['rozdil'] = rozdil
-                celkem_rozdil += rozdil
+                # Daňová povinnost = Výstup (D) - Vstup (MD)
+                r = data['vystup'] - data['vstup']
+                data['rozdil'] = r
+                celkem_rozdil += r
 
             prehled['CELKEM'] = celkem_rozdil
             return dict(prehled)
 
         except Exception as e:
-            print(f"Chyba při výpočtu přehledu DPH: {e}")
+            print(f"SQL Error DPH: {e}")
             return {'CELKEM': 0.0}
 
     # --- PŘEPRACOVANÁ METODA PRO UKLÁDÁNÍ TRANSAKCE (Nyní s DPH) ---
