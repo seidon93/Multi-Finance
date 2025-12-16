@@ -126,6 +126,10 @@ class AccountingEngine:
         sazby_dict = self.get_dph_sazby()
 
         for procento, ucty in sazby_dict.items():
+
+            if procento == 0.0:
+                continue
+
             ucet_vstup = ucty['vstup']
             ucet_vystup = ucty['vystup']
 
