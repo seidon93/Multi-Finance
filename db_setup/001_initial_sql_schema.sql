@@ -89,8 +89,8 @@ CREATE TABLE SazbyDPH (
 INSERT INTO UctovyRozvrh (ucet, nazev, typ_uctu) VALUES
 ('221', 'Běžný bankovní účet', 'A'),
 ('311', 'Pohledávky za odběrateli', 'A'),
-('343', 'Daň z přidané hodnoty', 'P'), -- Potřebujeme 343 pro váš test!
-('321', 'Závazky vůči dodavatelům', 'P'), -- Potřebujeme 321 pro váš test!
+('343.1.12', 'Daň z přidané hodnoty', 'P'),
+('321', 'Závazky vůči dodavatelům', 'P'),
 ('511', 'Opravy a udržování', 'N'),
 ('602', 'Tržby za služby', 'V');
 
@@ -99,9 +99,9 @@ INSERT INTO UctovyRozvrh (ucet, nazev, typ_uctu) VALUES
 ('343.2', 'DPH na výstupu (Závazek)', 'P');
 
 INSERT INTO SazbyDPH (procento, typ_dph, ucet_dph_vstup, ucet_dph_vystup) VALUES
-(21.00, 'Standardní', '343.1', '343.2'),
-(15.00, 'Snížená', '343.1', '343.2'),
-(0.00, 'Osvobozeno', '343.1', '343.2');
+(21.00, 'Standardní', '343.1.21', '343.2.21'),
+(12.00, 'Snížená', '343.1.12', '343.2.12'),
+(0.00, 'Osvobozeno', '343.1.00', '343.2.00');
 
 -- Naplnění Klienti (Multi-tenancy základ)
 SET IDENTITY_INSERT Klienti ON;

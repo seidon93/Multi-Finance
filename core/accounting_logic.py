@@ -69,7 +69,6 @@ class AccountingEngine:
         return pohyby_list
 
     def spocti_zustatky(self):
-        # Ponecháno, v pořádku
         sql = """
         SELECT 
             ucet,
@@ -100,15 +99,61 @@ class AccountingEngine:
         results = execute_query(sql)
 
         sazby = {}
-        if results and results != []:
-            for procento, ucet_vstup, ucet_vystup in results:
-                sazby[float(procento)] = {'vstup': ucet_vstup, 'vystup': ucet_vystup}
-
-        # Fallback pro případ, že DB není správně inicializována
-        if not sazby and 0.00 not in sazby:
-            sazby[0.00] = {'vstup': '343.1', 'vystup': '343.2'}
-
+        for row in results:
+            # Ujistěte se, že procento je správně převedeno na float
+            procento = float(row[0])
+            sazby[procento] = {
+                'vstup': row[1],
+                'vystup': row[2]
+            }
         return sazby
+
+    def spocti_prehled_dph(self) -> dict:
+        """
+        Spočítá zůstatek pro každou sazbu DPH (Vstup vs. Výstup) a celkovou daňovou povinnost.
+        Vrací slovník s celkovým výsledkem a detaily po sazbách.
+
+        POZNÁMKA: get_zustatek_uctu vrací zůstatek jako decimal.Decimal,
+        proto musíme vše konvertovat na float pro sčítání (nebo použít decimal modul).
+        Zde volíme float pro zjednodušení zobrazení.
+        """
+
+        prehled = {}
+        # Inicializujeme jako float, proto budeme potřebovat konverzi při sčítání.
+        celkova_povinnost = 0.0
+
+        # 1. Získání definice sazeb DPH z DB
+        sazby_dict = self.get_dph_sazby()
+
+        for procento, ucty in sazby_dict.items():
+            ucet_vstup = ucty['vstup']
+            ucet_vystup = ucty['vystup']
+
+            # 2. Získání zůstatků (vrací decimal.Decimal)
+            zustatek_vstup = self.get_zustatek_uctu(ucet_vstup)
+            zustatek_vystup = self.get_zustatek_uctu(ucet_vystup)
+
+            # 3. Konverze na float PŘED matematickými operacemi (řeší TypeError)
+            zustatek_vstup_f = float(zustatek_vstup)
+            zustatek_vystup_f = float(zustatek_vystup)
+
+            # 4. Výpočet rozdílu
+            # DPH Povinnost = Závazek (343.2.xx, záporný zůstatek) + Pohledávka (343.1.xx, kladný zůstatek)
+            # Součet dává čistý rozdíl. Kladné číslo = nedoplatek k úhradě.
+            rozdil_sazby = zustatek_vstup_f + zustatek_vystup_f
+
+            # 5. Uložení výsledků pro danou sazbu
+            prehled[procento] = {
+                'vstup': zustatek_vstup_f,
+                'vystup': zustatek_vystup_f,
+                'rozdil': rozdil_sazby
+            }
+
+            # 6. Agregace celkové povinnosti (obě strany jsou float)
+            celkova_povinnost += rozdil_sazby
+
+        prehled['CELKEM'] = celkova_povinnost
+        return prehled
 
     # --- PŘEPRACOVANÁ METODA PRO UKLÁDÁNÍ TRANSAKCE (Nyní s DPH) ---
     def save_transakce(self, datum, popis, doklad_cislo, ucet_md_zaklad, ucet_dal_zaklad, castka_bez_dph, sazba_dph,

@@ -29,7 +29,7 @@ def zobrazit_header():
 
     vyber = st.sidebar.radio(
         "Zvolte Modul:",
-        ("Nová Transakce", "Přehled Účtů", "Historie")
+        ("Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie")
     )
     return vyber
 
@@ -51,7 +51,6 @@ def formular_nova_transakce():
         col_zaklad, col_protipolozka = st.columns(2)
 
         # Učty použité pro rozdělení základu a protipoložky (např. 511 a 321)
-        # Logika v enginu určí, který z nich nese CELKEM a který ZÁKLAD.
         ucet_md_zaklad = col_zaklad.text_input("Účet MD (Základ / Celkem)", value="511")
         ucet_dal_zaklad = col_protipolozka.text_input("Účet D (Základ / Celkem)", value="321")
         castka_bez_dph = st.number_input("Částka ZÁKLADU (bez DPH)", min_value=0.01, format="%.2f")
@@ -104,47 +103,122 @@ def formular_nova_transakce():
 def zobrazit_prehled_uctu():
     st.header("Přehled Zůstatků na Účtech")
 
-    # Účty, které chceme sledovat (Rozšířeno o testovací účty)
-    sledovane_ucty = ['221', '311', '602', '511', '343', '321', '343.1.21', '343.1.15',
-                      '343.1.00']  # Doplněna analytika
+    # --- PŘEHLED ÚČTŮ: ZAHRNUTÍ VŠECH ANALYTICKÝCH ÚČTŮ S POHYBY ---
+    sledovane_ucty = [
+        '221', '311', '602', '511', '321',
+        '343.1.21', '343.2.21', '343.1.12', '343.2.12', '343.1.00', '343.2.00',
+        '343.1', '343.2'
+    ]
 
     data = []
     for ucet in sledovane_ucty:
+        # PŘEKLEP OPRAVEN: z get_zustaatek_uctu na get_zustatek_uctu
         zustatek = engine.get_zustatek_uctu(ucet)
 
-        # --- KLÍČOVÝ KROK: DEFINOVÁNÍ NAZEV ---
+        # DEFINOVÁNÍ A ZÍSKÁNÍ NÁZVU ÚČTU
         nazev = engine.get_ucet_nazev(ucet)
-        # ---------------------------------------
 
-        data.append({
-            'Účet': ucet,
-            'Název': nazev,
-            'Zůstatek': zustatek
-        })
-
+        # Zobrazíme jen účty s nenulovým zůstatkem NEBO klíčové syntetické účty
+        if abs(zustatek) > 0.005 or ucet in ['221', '311', '321', '511', '602']:
+            data.append({
+                'Účet': ucet,
+                'Název': nazev,
+                'Zůstatek': zustatek
+            })
     # Převedeme na DataFrame pro lepší formátování
     df = pd.DataFrame(data)
     df['Zůstatek'] = df['Zůstatek'].map('{:,.2f} Kč'.format)
     st.table(df)
+    # ----------------------------------------------------
 
-    ucet_pro_detail = st.selectbox("Zobrazit detaily účtu", sledovane_ucty)
+    # --- HISTORIE ÚČTU: ZOBRAZENÍ DETAILNÍCH POHYBŮ ---
+    ucet_pro_detail = st.selectbox("Zobrazit detaily účtu", sorted(list(set(sledovane_ucty))))
+
     if st.button("Zobrazit Historii"):
-        pohyby = engine.get_pohyby_uctu(ucet_pro_detail)  # Nyní vrací Dicts
+        pohyby = engine.get_pohyby_uctu(ucet_pro_detail)
 
         st.subheader(f"Historie účtu {ucet_pro_detail} ({engine.get_ucet_nazev(ucet_pro_detail)})")
 
         if pohyby:
-            # Původní kód musíme změnit, aby místo modelů Transakce použil Dictionary
-            df_pohyby = pd.DataFrame(pohyby)  # <- Jednoduchá konverze listu Dictů
+            # Konverze Listu Dictionarys na DataFrame
+            df_pohyby = pd.DataFrame(pohyby)
 
-            # Formátování částky
+            # Formátování a uspořádání sloupců pro přehlednost
+            # Název Účtu by měl být zobrazen, pokud ho get_pohyby_uctu vrací
+            if 'Název Účtu' in df_pohyby.columns:
+                df_pohyby = df_pohyby[['Datum', 'Doklad Číslo', 'Popis Transakce', 'Směr', 'Částka', 'Název Účtu']]
+            else:
+                df_pohyby = df_pohyby[['Datum', 'Doklad Číslo', 'Popis Transakce', 'Směr', 'Částka']]
+
             df_pohyby['Částka'] = df_pohyby['Částka'].map('{:,.2f} Kč'.format)
 
-            # Zobrazení transakce jako DataFrame
-            st.dataframe(df_pohyby, use_container_width=True)  # <- Použijte pandas DataFrame
+            st.dataframe(df_pohyby, width='stretch')
         else:
             st.info("Na tomto účtu nejsou žádné pohyby.")
+    # ----------------------------------------------------
 
+
+def zobrazit_prehled_dph():
+    st.header("Daňová Povinnost DPH")
+
+    if st.button("Vypočítat DPH Povinnost"):
+        dph_data = engine.spocti_prehled_dph()
+        celkem = dph_data.pop('CELKEM')
+
+        # --- Tabulka zůstatků po sazbách ---
+        st.subheader("Detailní Přehled po Sazbách")
+
+        detail_data = []
+        for sazba, data in dph_data.items():
+            # Získání názvů analytických účtů pro lepší kontext
+            ucet_vstup = engine.get_dph_sazby()[sazba]['vstup']
+            ucet_vystup = engine.get_dph_sazby()[sazba]['vystup']
+
+            detail_data.append({
+                'Sazba (%)': f"{sazba:.2f}",
+                f'DPH VSTUP ({ucet_vstup})': data['vstup'],
+                f'DPH VÝSTUP ({ucet_vystup})': data['vystup'],
+                'Rozdíl DPH (Závazek - Pohledávka)': data['rozdil']
+            })
+
+        df_detail = pd.DataFrame(detail_data)
+
+        # Formátování sloupců
+        for col in df_detail.columns:
+            if col not in ['Sazba (%)']:
+                df_detail[col] = df_detail[col].map('{:,.2f} Kč'.format)
+
+        st.dataframe(df_detail, width='stretch')
+
+        st.markdown("---")
+
+        # --- Celková povinnost ---
+        st.subheader("Celková Daňová Povinnost")
+
+        if celkem > 0:
+            typ = "NEDOPLATEK (K ÚHRADĚ)"
+            barva = "red"
+        elif celkem < 0:
+            typ = "PŘEPLATEK (K VRÁCENÍ)"
+            barva = "green"
+        else:
+            typ = "NULOVÁ POVINNOST"
+            barva = "blue"
+
+        st.markdown(
+            f"""
+            <div style='
+                padding: 10px; 
+                border: 2px solid {barva}; 
+                border-radius: 5px; 
+                text-align: center;
+            '>
+                <h4>{typ}</h4>
+                <h1>{celkem:,.2f} Kč</h1>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 # --- Hlavní spouštěcí smyčka Streamlit ---
 if __name__ == "__main__":
@@ -154,6 +228,8 @@ if __name__ == "__main__":
         formular_nova_transakce()
     elif modul == "Přehled Účtů":
         zobrazit_prehled_uctu()
+    elif modul == "Přehled DPH":
+        zobrazit_prehled_dph()
     elif modul == "Historie":
         st.write("Modul Historie...")
 
@@ -169,7 +245,21 @@ if st.button("Obnovit Zůstatky"):
             zustatky_data.items(),
             columns=["Účet", "Zůstatek"]
         )
+
+        # 1. Přidání názvů účtů
+        zustatky_df['Název'] = zustatky_df['Účet'].apply(engine.get_ucet_nazev)
+
+        # 2. FILTROVÁNÍ: Použijeme absolutní hodnotu PŘED formátováním na řetězec
+        zustatky_df['AbsZustatek'] = zustatky_df['Zůstatek'].abs()
+        zustatky_df = zustatky_df[zustatky_df['AbsZustatek'] > 0.005]
+        zustatky_df.drop(columns=['AbsZustatek'], inplace=True)
+
+        # 3. FORMÁTOVÁNÍ: Až nyní převedeme sloupec 'Zůstatek' na řetězec s měnou
         zustatky_df["Zůstatek"] = zustatky_df["Zůstatek"].map('{:,.2f} Kč'.format)
+
+        # 4. Řazení a zobrazení
+        zustatky_df = zustatky_df.sort_values(by='Účet')
+        zustatky_df = zustatky_df[['Účet', 'Název', 'Zůstatek']]
 
         st.subheader("Syntetická Účetní Kniha")
         st.dataframe(zustatky_df, hide_index=True)
