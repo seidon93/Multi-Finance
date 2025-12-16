@@ -118,7 +118,7 @@ def zobrazit_header():
 
     vyber = st.sidebar.radio(
         "Zvolte Modul:",
-        ("Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie")
+        ("Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty")
     )
     return vyber
 
@@ -126,12 +126,12 @@ def zobrazit_header():
 def formular_nova_transakce():
     st.header("Vytvořit Novou Transakci")
 
-    # --- UPDATE DB TLAČÍTKO (Jen pro prvotní naplnění) ---
-    with st.expander("⚙️ Správa databáze"):
-        if st.button("Nahrát kompletní účtovou osnovu (cca 80 účtů)"):
-            zprava = engine.inicializuj_uctovy_rozvrh()
-            st.success(zprava)
-            # st.rerun() # Odkomentujte, pokud chcete hned refreshnout stránku
+    #  --- UPDATE DB TLAČÍTKO (Jen pro prvotní naplnění) ---
+    # with st.expander("⚙️ Správa databáze"):
+    #     if st.button("Nahrát kompletní účtovou osnovu (cca 80 účtů)"):
+    #         zprava = engine.inicializuj_uctovy_rozvrh()
+    #         st.success(zprava)
+    #         # st.rerun() # Odkomentujte, pokud chcete hned refreshnout stránku
 
     # --- DEFINICE ÚČETNÍCH TŘÍD PRO VÝBĚR ---
     tridy_uctu = [
@@ -350,6 +350,107 @@ def time_filter_ui():
             st.rerun()
 
         return st.session_state['filter_date_from'], st.session_state['filter_date_to']
+
+
+def zobrazit_reporty():
+    st.header("📊 Účetní závěrka")
+
+    # Filtr
+    date_from, date_to = time_filter_ui()
+
+    # Informace o filtru
+    if date_from and date_to:
+        st.info(f"Zobrazeno pro období: {date_from.strftime('%d.%m.%Y')} – {date_to.strftime('%d.%m.%Y')}")
+    else:
+        st.info("Zobrazeno kumulativně od počátku věků.")
+
+    # Načtení dat z backendu
+    data = engine.get_report_data(date_from, date_to)
+
+    # --- ZÁLOŽKY ---
+    tab_vysledovka, tab_rozvaha = st.tabs(["📉 Výsledovka (Zisk/Ztráta)", "⚖️ Rozvaha (Aktiva/Pasiva)"])
+
+    # 1. VÝSLEDOVKA
+    with tab_vysledovka:
+        c1, c2 = st.columns(2)
+
+        # Náklady
+        with c1:
+            st.subheader("Náklady")
+            if data['naklady']:
+                df = pd.DataFrame(data['naklady'])
+                df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f} Kč")
+                st.dataframe(df, hide_index=True, use_container_width=True)
+            else:
+                st.caption("Žádné náklady.")
+
+            st.metric("Celkem Náklady", f"{data['suma_naklady']:,.2f} Kč")
+
+        # Výnosy
+        with c2:
+            st.subheader("Výnosy")
+            if data['vynosy']:
+                df = pd.DataFrame(data['vynosy'])
+                df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f} Kč")
+                st.dataframe(df, hide_index=True, use_container_width=True)
+            else:
+                st.caption("Žádné výnosy.")
+
+            st.metric("Celkem Výnosy", f"{data['suma_vynosy']:,.2f} Kč")
+
+        st.markdown("---")
+
+        # HV
+        hv = data['hospodarsky_vysledek']
+        color = "#28a745" if hv >= 0 else "#dc3545"
+        label = "ZISK" if hv >= 0 else "ZTRÁTA"
+
+        st.markdown(
+            f"<div style='text-align: center; padding: 20px; background-color: rgba(255,255,255,0.05); border-radius: 10px; border: 1px solid {color};'>"
+            f"<h3 style='margin:0'>Výsledek hospodaření ({label})</h3>"
+            f"<h1 style='color: {color}; margin:0'>{hv:,.2f} Kč</h1>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+
+    # 2. ROZVAHA
+    with tab_rozvaha:
+        c1, c2 = st.columns(2)
+
+        # Aktiva
+        with c1:
+            st.subheader("Aktiva (Majetek)")
+            if data['aktiva']:
+                df = pd.DataFrame(data['aktiva'])
+                df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f} Kč")
+                st.dataframe(df, hide_index=True, use_container_width=True)
+            else:
+                st.caption("Žádná aktiva.")
+
+            st.markdown(f"#### Σ Aktiva: {data['suma_aktiva']:,.2f} Kč")
+
+        # Pasiva
+        with c2:
+            st.subheader("Pasiva (Zdroje)")
+            if data['pasiva']:
+                df = pd.DataFrame(data['pasiva'])
+                df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f} Kč")
+                st.dataframe(df, hide_index=True, use_container_width=True)
+            else:
+                st.caption("Žádná pasiva.")
+
+            st.markdown(f"#### Σ Pasiva: {data['suma_pasiva']:,.2f} Kč")
+
+        st.markdown("---")
+
+        # Bilanční kontrola
+        rozdil = data['suma_aktiva'] - data['suma_pasiva']
+
+        if abs(rozdil) < 0.02:
+            st.success(f"✅ Bilanční rovnice sedí! (Aktiva = Pasiva)")
+        else:
+            st.error(f"❌ Neshoda v bilanci: {rozdil:,.2f} Kč")
+            # st.caption("Pozor: Zkontrolujte, zda máte správně nastavené typy účtů (A/P) v databázi.")
 
 
 def zobrazit_prehled_uctu():
@@ -599,3 +700,5 @@ if __name__ == "__main__":
         zobrazit_prehled_dph()
     elif modul == "Historie":
         zobrazit_historii_uctu()
+    elif modul == "Reporty":
+        zobrazit_reporty()

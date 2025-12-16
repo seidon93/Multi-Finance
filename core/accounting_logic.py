@@ -541,10 +541,6 @@ class AccountingEngine:
             }
         return sazby
 
-    # soubor: core/accounting_logic.py
-
-    # ... (uvnitř třídy AccountingEngine) ...
-
     def spocti_prehled_dph(self, datum_od=None, datum_do=None):
         # --- DEBUG START ---
         print(f"\n=== DEBUG DPH START ===")
@@ -641,6 +637,126 @@ class AccountingEngine:
         except Exception as e:
             print(f"CHYBA DPH: {e}")
             return {'CELKEM': Decimal('0.0')}
+
+    def get_report_data(self, datum_od=None, datum_do=None):
+        """
+        Vrátí data pro Rozvahu a Výsledovku na základě skutečného typu účtu v DB (A, P, N, V).
+        """
+        report = {
+            'aktiva': [],
+            'pasiva': [],
+            'naklady': [],
+            'vynosy': [],
+            'suma_aktiva': 0.0,
+            'suma_pasiva': 0.0,
+            'suma_naklady': 0.0,
+            'suma_vynosy': 0.0,
+            'hospodarsky_vysledek': 0.0
+        }
+
+        # SQL: Spojíme Pohyby + Transakce (kvůli datu) + Rozvrh (kvůli typu účtu)
+        sql = """
+            SELECT 
+                P.ucet,
+                R.nazev,
+                R.typ_uctu,
+                SUM(CASE WHEN P.smer = 'MD' THEN P.castka ELSE 0 END) as SumaMD,
+                SUM(CASE WHEN P.smer = 'D' THEN P.castka ELSE 0 END) as SumaD
+            FROM UcetniPohyby P
+            JOIN Transakce T ON T.id = P.transakce_id
+            JOIN UctovyRozvrh R ON P.ucet = R.ucet
+            WHERE P.klient_id = ?
+        """
+
+        params = [self.klient_id]
+
+        # Aplikace filtrů
+        if datum_od:
+            d_od = datum_od.strftime('%Y-%m-%d') if hasattr(datum_od, 'strftime') else datum_od
+            sql += " AND T.datum >= ?"
+            params.append(d_od)
+
+        if datum_do:
+            d_do = datum_do.strftime('%Y-%m-%d') if hasattr(datum_do, 'strftime') else datum_do
+            sql += " AND T.datum <= ?"
+            params.append(d_do)
+
+        sql += " GROUP BY P.ucet, R.nazev, R.typ_uctu ORDER BY P.ucet"
+
+        try:
+            with Database() as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, tuple(params))
+                rows = cursor.fetchall()
+
+            for row in rows:
+                ucet = row[0]
+                nazev = row[1]
+                typ = row[2]  # Tady máme 'A', 'P', 'N', 'V' přímo z DB
+                suma_md = float(row[3]) if row[3] else 0.0
+                suma_d = float(row[4]) if row[4] else 0.0
+
+                # Výpočet zůstatku (MD - D)
+                # Kladné číslo = převaha MD, Záporné číslo = převaha D
+                zustatek_raw = suma_md - suma_d
+
+                # Ignorujeme nulové zůstatky
+                if abs(zustatek_raw) < 0.01:
+                    continue
+
+                polozka = {'ucet': ucet, 'nazev': nazev}
+
+                # --- LOGIKA ROZDĚLENÍ PODLE TYPU Z DB ---
+
+                if typ == 'A':  # AKTIVA
+                    # Aktiva mají mít zůstatek na MD (kladný).
+                    polozka['castka'] = zustatek_raw
+                    report['aktiva'].append(polozka)
+                    report['suma_aktiva'] += zustatek_raw
+
+                elif typ == 'P':  # PASIVA
+                    # Pasiva mají mít zůstatek na D (záporný v naší logice MD-D).
+                    # Pro report je převedeme na kladné číslo pomocí abs().
+                    polozka['castka'] = abs(zustatek_raw)
+                    report['pasiva'].append(polozka)
+                    report['suma_pasiva'] += abs(zustatek_raw)
+
+                elif typ == 'N':  # NÁKLADY
+                    # Náklady jsou na MD (kladné)
+                    polozka['castka'] = zustatek_raw
+                    report['naklady'].append(polozka)
+                    report['suma_naklady'] += zustatek_raw
+
+                elif typ == 'V':  # VÝNOSY
+                    # Výnosy jsou na D (záporné v logice MD-D).
+                    # Převedeme na kladné pro zobrazení.
+                    polozka['castka'] = abs(zustatek_raw)
+                    report['vynosy'].append(polozka)
+                    report['suma_vynosy'] += abs(zustatek_raw)
+
+                # (Typy Z, S atd. zatím ignorujeme, pokud nejsou součástí výkazů)
+
+            # --- VÝPOČET ZISKU (HV) ---
+            # Zisk = Výnosy - Náklady
+            hv = report['suma_vynosy'] - report['suma_naklady']
+            report['hospodarsky_vysledek'] = hv
+
+            # --- ZAROVNÁNÍ BILANCE ---
+            # Zisk je zdrojem krytí majetku -> patří do PASIV
+            # Ztráta snižuje vlastní kapitál -> snižuje PASIVA (je tam jako záporná položka nebo minus v pasivech)
+            if abs(hv) > 0.005:
+                report['pasiva'].append({
+                    'ucet': 'HV',
+                    'nazev': 'Výsledek hospodaření (Zisk/Ztráta)',
+                    'castka': hv  # Pokud je zisk, přičte se k pasivům. Pokud ztráta, odečte se.
+                })
+                report['suma_pasiva'] += hv
+
+            return report
+
+        except Exception as e:
+            print(f"Chyba při generování reportu: {e}")
+            return report
 
     # --- PŘEPRACOVANÁ METODA PRO UKLÁDÁNÍ TRANSAKCE (Nyní s DPH) ---
     def save_transakce(self, datum, popis, doklad_cislo, ucet_md_zaklad, ucet_dal_zaklad, castka_bez_dph, sazba_dph,
