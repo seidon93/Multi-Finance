@@ -246,80 +246,61 @@ def time_filter_ui():
 
         return st.session_state['filter_date_from'], st.session_state['filter_date_to']
 
+
 def zobrazit_prehled_uctu():
-    st.header("Přehled Zůstatků na Účtech")
+    st.header("Hlavní Přehled Účtů")
 
-    # --- VLOŽENÍ ČASOVÉHO FILTRU ---
+    # --- 1. ČASOVÝ FILTR ---
     date_from, date_to = time_filter_ui()
-    st.markdown("---")  # Oddělení filtru od přehledu
 
-    # Získání zůstatků s filtrem
-    # Upozornění: Změna názvu funkce spocti_zustatky na spocitej_zustatky je klíčová,
-    # ale protože neznám Váš skutečný Engine, nechávám původní název, aby nedošlo k duplicitní chybě.
-    zustatky_all = engine.spocti_zustatky(datum_od=date_from, datum_do=date_to)
+    # --- 2. NAČTENÍ DAT ---
+    zustatky_data = engine.spocti_zustatky(datum_od=date_from, datum_do=date_to)
 
-    # --- 1. SEZNAM SLEDOVANÝCH ÚČTŮ (FILTROVANÝ PŘEHLED) ---
-    st.subheader("Přehled Sledovaných Účtů (Klíčová Analytika)")
+    if not zustatky_data:
+        st.info("V zadaném období nebyly nalezeny žádné pohyby.")
+        return
 
-    sledovane_ucty = [
-        '221', '311', '602', '511', '321',
-        '343.1.21', '343.2.21', '343.1.12', '343.2.12', '343.1.00', '343.2.00',
-        '343.1', '343.2'
-    ]
+    # --- 3. PŘÍPRAVA DAT PRO TABULKU ---
+    data_pro_tabulku = []
 
-    data = []
-    for ucet in sledovane_ucty:
-        # POUŽITÍ NOVÉHO FILTROVANÉHO ZŮSTATKU
-        zustatek = zustatky_all.get(ucet, 0.0)
-        nazev = engine.get_ucet_nazev(ucet)
+    # Seznam účtů, které chceme vidět VŽDY (VIP)
+    vip_ucty = ['211', '221', '311', '321']
 
-        # Zobrazíme jen účty s nenulovým zůstatkem NEBO klíčové syntetické účty
-        if abs(zustatek) > 0.005 or ucet in ['221', '311', '321', '511', '602']:
-            data.append({
-                'Účet': ucet,
-                'Název': nazev,
-                'Zůstatek': zustatek
+    for ucet, castka in zustatky_data.items():
+        # Podmínka: Zobrazit, pokud je zůstatek nenulový NEBO je to VIP účet
+        if abs(castka) > 0.005 or ucet in vip_ucty:
+            nazev = engine.get_ucet_nazev(ucet)
+            data_pro_tabulku.append({
+                "Účet": ucet,
+                "Název": nazev,
+                "Zůstatek Raw": castka,
+                "Zůstatek": castka
             })
 
-    # Formátování a zobrazení tabulky
-    df = pd.DataFrame(data)
-    if not df.empty:
-        df['Zůstatek'] = df['Zůstatek'].map('{:,.2f} Kč'.format)
-        st.table(df)
+    # --- 4. VYTVOŘENÍ DATAFRAME ---
+    if data_pro_tabulku:
+        df = pd.DataFrame(data_pro_tabulku)
+
+        # Seřazení podle čísla účtu
+        df = df.sort_values(by='Účet')
+
+        # Formátování měny
+        df['Zůstatek'] = df['Zůstatek'].apply(
+            lambda x: f"{x:,.2f} Kč".replace(",", " ").replace(".", ",")
+        )
+
+        # --- NOVÝ NADPIS ---
+        st.subheader("Detailní přehled účtů")
+
+        # --- VYKRESLENÍ TABULKY ---
+        # Odstraněn parametr 'height', aby se tabulka přizpůsobila obsahu
+        st.dataframe(
+            df[['Účet', 'Název', 'Zůstatek']],
+            hide_index=True,
+            use_container_width=True
+        )
     else:
-        st.info("Žádné zůstatky na sledovaných účtech v zadaném období.")
-
-    # --- 2. SYNTERICKÁ ÚČETNÍ KNIHA (AGREGACE) ---
-    st.subheader("Syntetická Účetní Kniha (Všechny zůstatky)")
-
-    if st.button("Obnovit Agregované Zůstatky"):
-        # VOLÁNÍ S FILTREM I ZDE
-        zustatky_data = engine.spocti_zustatky(datum_od=date_from, datum_do=date_to)
-
-        if zustatky_data:
-            zustatky_df = pd.DataFrame(
-                zustatky_data.items(),
-                columns=["Účet", "Zůstatek"]
-            )
-
-            # 1. Přidání názvů účtů
-            zustatky_df['Název'] = zustatky_df['Účet'].apply(engine.get_ucet_nazev)
-
-            # 2. FILTROVÁNÍ: Použijeme absolutní hodnotu PŘED formátováním na řetězec
-            zustatky_df['AbsZustatek'] = zustatky_df['Zůstatek'].abs()
-            zustatky_df = zustatky_df[zustatky_df['AbsZustatek'] > 0.005]
-            zustatky_df.drop(columns=['AbsZustatek'], inplace=True)
-
-            # 3. FORMÁTOVÁNÍ: Až nyní převedeme sloupec 'Zůstatek' na řetězec s měnou
-            zustatky_df["Zůstatek"] = zustatky_df["Zůstatek"].map('{:,.2f} Kč'.format)
-
-            # 4. Řazení a zobrazení
-            zustatky_df = zustatky_df.sort_values(by='Účet')
-            zustatky_df = zustatky_df[['Účet', 'Název', 'Zůstatek']]
-
-            st.dataframe(zustatky_df, hide_index=True, width='stretch')
-        else:
-            st.warning("Nelze načíst nebo spočítat agregované zůstatky v zadaném období.")
+        st.warning("Žádné účty nemají v tomto období nenulový zůstatek.")
 
 
 def zobrazit_prehled_dph():
@@ -329,111 +310,91 @@ def zobrazit_prehled_dph():
     date_from, date_to = time_filter_ui()
     st.markdown("---")
 
-    # --- Inicializace Session State pro DPH data ---
-    if 'dph_data' not in st.session_state:
-        st.session_state['dph_data'] = None
-    if 'dph_celkem' not in st.session_state:
-        st.session_state['dph_celkem'] = Decimal('0.0')
-    if 'last_dph_filter' not in st.session_state:
-        st.session_state['last_dph_filter'] = None
+    # 2. Výpočet dat
+    try:
+        dph_data_raw = engine.spocti_prehled_dph(datum_od=date_from, datum_do=date_to)
+        # Bezpečné vyjmutí celkové sumy
+        celkem = dph_data_raw.pop('CELKEM', Decimal('0.0'))
+    except Exception as e:
+        st.error(f"Chyba při výpočtu DPH: {e}")
+        dph_data_raw = {}
+        celkem = Decimal('0.0')
 
-    # Uložení aktuálního filtru pro detekci změn
-    current_filter = (date_from, date_to)
+    # --- DEBUG: Ověření pro vás (pokud vidíte 0, filtr funguje) ---
+    # Pokud zadáte rok 2020 a je tu 0, ale v "Tento rok" je číslo, vše funguje.
+    # st.caption(f"DEBUG: Aplikovaný filtr: {date_from} až {date_to}. Celkem nalezeno: {celkem}")
 
-    # --- Logika pro automatický výpočet ---
-    # Spustí výpočet, POUZE pokud se změní filtr
-    if st.session_state['last_dph_filter'] != current_filter:
-        st.session_state['last_dph_filter'] = current_filter
-
-        with st.spinner(
-                f"Počítám DPH povinnost pro období od {date_from if date_from else 'počátku'} do {date_to if date_to else 'současnosti'}..."):
-            try:
-                # Volání skutečné DB metody
-                dph_data_raw = engine.spocti_prehled_dph(datum_od=date_from, datum_do=date_to)
-
-                # Zajištění, že data jsou v Decimal formátu a CELKEM existuje
-                celkem = dph_data_raw.pop('CELKEM', Decimal('0.0'))
-
-                # Uložit data do stavu
-                st.session_state['dph_celkem'] = Decimal(celkem)
-                st.session_state['dph_data'] = dph_data_raw
-
-            except Exception as e:
-                st.error(f"Chyba při výpočtu DPH. Zkontrolujte metodu spocti_prehled_dph() a data: {e}")
-                st.session_state['dph_data'] = None
-                st.session_state['dph_celkem'] = Decimal('0.0')
-
-    # --- Zobrazení výsledků (Čtení ze Session State) ---
-    dph_data = st.session_state['dph_data']
-    celkem = st.session_state['dph_celkem']
-
-    if dph_data is None:
-        st.info("Vyberte prosím časové rozmezí pro výpočet DPH nebo ověřte, že Váš Engine vrací platná data.")
-        return
-
-    # Dynamická hlavička pro období
+    # 3. Informační hlavička
     date_from_str = date_from.strftime('%d.%m.%Y') if date_from else 'Počátek'
     date_to_str = date_to.strftime('%d.%m.%Y') if date_to else 'Současnost'
+
     st.info(f"Přehled DPH za období: **{date_from_str} – {date_to_str}**")
 
-    # --- Tabulka zůstatků po sazbách ---
+    # 4. Tabulka detailů
     st.subheader("Detailní Přehled po Sazbách")
 
-    detail_data = []
-    dph_ucty_map = engine.get_dph_sazby()
+    if not dph_data_raw:
+        st.warning("V tomto období nejsou žádné pohyby DPH.")
+    else:
+        detail_data = []
+        dph_ucty_map = engine.get_dph_sazby()
+        sorted_sazby = sorted([k for k in dph_data_raw.keys()], reverse=True)
 
-    for sazba, data in dph_data.items():
-        if sazba != 'CELKEM':
-            ucty_map = dph_ucty_map.get(sazba, {'vstup': 'N/A', 'vystup': 'N/A'})
+        for sazba in sorted_sazby:
+            data = dph_data_raw[sazba]
+            ucty_map = dph_ucty_map.get(sazba, {'vstup': '?', 'vystup': '?'})
 
-            # Převedení na Decimal, pokud by náhodou Engine vrátil float (zabezpečení)
-            vstup = Decimal(data.get('vstup', 0.0))
-            vystup = Decimal(data.get('vystup', 0.0))
-            rozdil = Decimal(data.get('rozdil', 0.0))
+            vstup = data.get('vstup', Decimal('0.0'))
+            vystup = data.get('vystup', Decimal('0.0'))
+            rozdil = data.get('rozdil', Decimal('0.0'))
 
+            # ZDE BYLA CHYBA: Názvy sloupců musí být statické, účty dáme do závorky hodnoty nebo zvlášť
             detail_data.append({
-                'Sazba (%)': f"{sazba:.2f}",
-                f'DPH VSTUP ({ucty_map["vstup"]})': vstup,
-                f'DPH VÝSTUP ({ucty_map["vystup"]})': vystup,
-                'Rozdíl DPH (Závazek - Pohledávka)': rozdil
+                'Sazba': f"{sazba:.0f} %",
+                'DPH Vstup (MD)': f"{vstup:,.2f} Kč".replace(",", " ").replace(".", ","),
+                'DPH Výstup (D)': f"{vystup:,.2f} Kč".replace(",", " ").replace(".", ","),
+                'Rozdíl': f"{rozdil:,.2f} Kč".replace(",", " ").replace(".", ","),
+                # Skryté info o účtech pro tooltip nebo kontrolu (volitelné)
+                'Účty': f"Vstup: {ucty_map['vstup']} | Výstup: {ucty_map['vystup']}"
             })
 
-    if not detail_data:
-        st.warning("Nejsou nalezeny žádné DPH pohyby pro toto období.")
-    else:
-        df_detail = pd.DataFrame(detail_data)
+        if detail_data:
+            df_detail = pd.DataFrame(detail_data)
+            st.dataframe(
+                df_detail,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Účty": st.column_config.TextColumn("Použité účty", help="Účty použité pro výpočet")
+                }
+            )
 
-        # Formátování: Decimal to string
-        df_detail = df_detail.fillna(Decimal('0.0'))
-
-        for col in df_detail.columns:
-            if col not in ['Sazba (%)']:
-                df_detail[col] = df_detail[col].apply(lambda x: f'{x:,.2f} Kč')
-
-        st.dataframe(
-            df_detail,
-            hide_index=True,
-            width='stretch'
-        )
-
-    # --- Celková povinnost ---
+    # 5. Celková povinnost (Barevný Box)
     st.subheader("Celková Daňová Povinnost")
 
+    # Logika barev a textů
     if celkem > Decimal('0.005'):
         typ = "NEDOPLATEK (K ÚHRADĚ)"
         barva_css = "#dc3545"  # Červená
+        # Nedoplatek je kladný, zobrazujeme tak jak je
+        suma_str = f"{celkem:,.2f} Kč"
     elif celkem < Decimal('-0.005'):
         typ = "PŘEPLATEK (K VRÁCENÍ)"
         barva_css = "#28a745"  # Zelená
+        # Přeplatek je záporný, ale chceme zobrazit kladné číslo "Kolik nám vrátí"
+        suma_str = f"{abs(celkem):,.2f} Kč"
     else:
         typ = "NULOVÁ POVINNOST"
         barva_css = "#007bff"  # Modrá
+        suma_str = "0,00 Kč"
+
+    suma_str = suma_str.replace(",", " ").replace(".", ",")
 
     st.markdown(
         f"""
-        <div class='dph-box' style='border-color: {barva_css};'>
-            <h4>{typ}</h4>
-            <h1>{celkem:,.2f} Kč</h1>
+        <div class='dph-box' style='border-color: {barva_css}; color: {barva_css};'>
+            <h4 style='color: inherit; margin: 0;'>{typ}</h4>
+            <h1 style='color: inherit; margin: 10px 0;'>{suma_str}</h1>
         </div>
         """,
         unsafe_allow_html=True
