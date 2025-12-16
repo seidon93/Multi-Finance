@@ -6,8 +6,8 @@ import pandas as pd
 
 # Zajištění, že se importují moduly z nadřazeného adresáře (core)
 current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(os.path.basename(current_dir)) # Oprava pro spolehlivost
-sys.path.append(parent_dir)
+# Oprava: sys.path.append(os.path.join(current_dir, '..')) je spolehlivější
+sys.path.append(os.path.join(current_dir, os.pardir))
 
 from dotenv import load_dotenv
 from core.accounting_logic import AccountingEngine
@@ -20,6 +20,51 @@ KLIENT_ID = 1
 
 # Inicializace účetního enginu pro daného klienta (globálně)
 engine = AccountingEngine(klient_id=KLIENT_ID)
+
+# --- CSS STYLING (FIX BAREV S !important) ---
+st.markdown(
+    """
+    <style>
+    /* Obecné styly pro mřížku (i když se teď nepoužívá, necháme je pro případné znovuzavedení) */
+    [data-testid="stColumn"] {
+        flex: 1 1 0% !important;
+        min-width: 150px;
+        max-width: 300px;
+    }
+
+    /* Vizuální styly pro text v hlavičce Historie */
+    .zustatek-kladny {
+        color: #28a745 !important; /* Zelená */
+        font-size: 1.15em !important;
+        font-weight: bold !important;
+    }
+    .zustatek-zaporny {
+        color: #dc3545 !important; /* Červená */
+        font-size: 1.15em !important;
+        font-weight: bold !important;
+    }
+
+    /* Barva pro název a číslo účtu v hlavičce detailu */
+    .ucet-nazev {
+        color: #17a2b8 !important; /* Tyrkysová/Modrá pro odlišení */
+        font-size: 1.25em !important; /* Mírně zvětšeno */
+        font-weight: bold !important;
+        margin-bottom: 0px; /* Přiblíží název k zůstatku */
+    }
+
+    /* Zajištění, že p tagy s textem účtu nezanechávají zbytečné mezery */
+    p {
+        margin-bottom: 5px; 
+        margin-top: 5px;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# --- KONEC CSS STYLINGU ---
 
 
 def zobrazit_header():
@@ -131,8 +176,6 @@ def zobrazit_prehled_uctu():
     else:
         st.info("Žádné zůstatky na sledovaných účtech.")
 
-    # st.markdown("---") # Odstraněna čára
-
     # --- 2. SYNTERICKÁ ÚČETNÍ KNIHA (AGREGACE) ---
     st.subheader("Syntetická Účetní Kniha (Všechny zůstatky)")
 
@@ -231,42 +274,73 @@ def zobrazit_prehled_dph():
             unsafe_allow_html=True
         )
 
-# --- NOVÁ FUNKCE NA GLOBÁLNÍ ÚROVNI ---
+
 def zobrazit_historii_uctu():
-    st.header("Historie Účtu")
+    st.header("Historie Účtu (Detailní Přehled)")
 
-    # Získání seznamu všech účtů, které mají pohyb, pro výběr
-    zustatky = engine.spocti_zustatky()
-    seznam_uctu = sorted(zustatky.keys())
+    # 1. Získání seznamu všech účtů s nenulovým zůstatkem
+    zustatky_all = engine.spocti_zustatky()
+    seznam_uctu_s_pohybem = [ucet for ucet, zustatek in zustatky_all.items() if abs(zustatek) > 0.005]
+    seznam_uctu_s_pohybem = sorted(seznam_uctu_s_pohybem)
 
-    # Vytvoření selectboxu pro výběr účtu
-    vybrany_ucet = st.selectbox(
-        "Vyberte účet pro zobrazení historie:",
-        seznam_uctu
+    if not seznam_uctu_s_pohybem:
+        st.info("Žádný účet nemá aktuálně nenulový zůstatek pro zobrazení historie.")
+        return
+
+    # --- FILTRACE ÚČTŮ POMOCÍ MULTISELECTU ---
+    st.subheader("1. Výběr účtů pro detailní přehled")
+
+    vybrane_ucty_k_zobrazeni = st.multiselect(
+        "Vyberte účty, jejichž historii chcete zobrazit:",
+        options=seznam_uctu_s_pohybem,
+        # Předvybereme klíčové účty nebo všechny jako výchozí
+        default=[u for u in ['221', '321', '311'] if u in seznam_uctu_s_pohybem] or seznam_uctu_s_pohybem
     )
 
-    if vybrany_ucet:
-        if st.button("Zobrazit Pohyby"):
-            pohyby = engine.get_pohyby_uctu(vybrany_ucet)
+    if not vybrane_ucty_k_zobrazeni:
+        st.warning("Prosím, vyberte alespoň jeden účet k zobrazení.")
+        return
 
-            st.subheader(f"Pohyby účtu {vybrany_ucet} ({engine.get_ucet_nazev(vybrany_ucet)})")
+    # --- DETAILNÍ PŘEHLED VYBRANÝCH ÚČTŮ ---
+    st.subheader("2. Detailní pohyby")
 
-            if pohyby:
-                df_pohyby = pd.DataFrame(pohyby)
+    # Projdeme každý vybraný účet a zobrazíme jeho historii
+    for ucet_k_zobrazeni in vybrane_ucty_k_zobrazeni:
 
-                # Zajištění formátování a pořadí sloupců
-                required_cols = ['Datum', 'Doklad Číslo', 'Popis Transakce', 'Směr', 'Částka']
+        pohyby = engine.get_pohyby_uctu(ucet_k_zobrazeni)
+        aktualni_zustatek = zustatky_all.get(ucet_k_zobrazeni, 0)
 
-                if 'Název Účtu' in df_pohyby.columns:
-                    required_cols.append('Název Účtu')
+        # Určení CSS třídy pro barevné odlišení zůstatku
+        css_class_zustatek = "zustatek-kladny" if aktualni_zustatek >= 0 else "zustatek-zaporny"
 
-                df_pohyby = df_pohyby[required_cols]
+        # Vytvoření zvýrazněné hlavičky pomocí CSS tříd
+        st.markdown(
+            f'<p class="ucet-nazev">'
+            f'Pohyby účtu {ucet_k_zobrazeni} : {engine.get_ucet_nazev(ucet_k_zobrazeni)}'
+            f'</p>'
+            f'<p>Aktuální zůstatek: <span class="{css_class_zustatek}">{aktualni_zustatek:,.2f} Kč</span></p>',
+            unsafe_allow_html=True
+        )
 
-                df_pohyby['Částka'] = df_pohyby['Částka'].apply(lambda x: f'{x:,.2f} Kč')
+        if pohyby:
+            df_pohyby = pd.DataFrame(pohyby)
 
-                st.dataframe(df_pohyby, width='stretch', hide_index=True)
-            else:
-                st.info(f"Na účtu {vybrany_ucet} nebyly nalezeny žádné pohyby.")
+            # !!! ODSTRANĚNÍ SLOUPEČKU SMĚR ('Směr') !!!
+            required_cols = ['Datum', 'Doklad Číslo', 'Popis Transakce', 'Částka']
+
+            if 'Název Účtu' in df_pohyby.columns:
+                required_cols.append('Název Účtu')
+
+            # Filtrování sloupců (nyní bez 'Směr')
+            df_pohyby = df_pohyby[required_cols]
+
+            df_pohyby['Částka'] = df_pohyby['Částka'].apply(lambda x: f'{x:,.2f} Kč')
+
+            st.dataframe(df_pohyby, width='stretch', hide_index=True)
+
+        else:
+            st.info(f"Na účtu {ucet_k_zobrazeni} nebyly nalezeny žádné pohyby.")
+
 
 # --- Hlavní spouštěcí smyčka Streamlit ---
 if __name__ == "__main__":
