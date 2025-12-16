@@ -372,7 +372,7 @@ def zobrazit_reporty():
     tab_vysledovka, tab_rozvaha = st.tabs(["📉 Výsledovka", "⚖️ Rozvaha"])
 
     # =========================================================
-    # 1. VÝSLEDOVKA (Zůstává stejná, jen pro úplnost)
+    # 1. VÝSLEDOVKA (BANNER + VERTIKÁLNÍ TABULKY)
     # =========================================================
     with tab_vysledovka:
         hv = data['hospodarsky_vysledek']
@@ -380,9 +380,10 @@ def zobrazit_reporty():
         bg_hv = "rgba(40, 167, 69, 0.1)" if hv >= 0 else "rgba(220, 53, 69, 0.1)"
         label_hv = "ČISTÝ ZISK" if hv >= 0 else "ZTRÁTA"
 
+        # BANNER VÝSLEDKU
         st.markdown(
             f"""
-            <div style="background-color: {bg_hv}; padding: 15px; border-radius: 8px; border-left: 5px solid {barva_hv}; text-align: center; margin-bottom: 20px;">
+            <div style="background-color: {bg_hv}; padding: 15px; border-radius: 8px; border-left: 5px solid {barva_hv}; text-align: center; margin-bottom: 30px;">
                 <h4 style="margin:0; color: #888;">VÝSLEDEK HOSPODAŘENÍ ({label_hv})</h4>
                 <h1 style="margin:0; color: {barva_hv}; font-size: 2.2em;">{hv:,.2f} Kč</h1>
             </div>
@@ -390,60 +391,80 @@ def zobrazit_reporty():
             unsafe_allow_html=True
         )
 
-        c1, c2 = st.columns(2)
+        # --- NÁKLADY ---
+        st.markdown(
+            f"<h3 style='border-bottom: 3px solid #dc3545; padding-bottom: 5px; margin-bottom: 10px;'>Náklady</h3>",
+            unsafe_allow_html=True)
+        st.markdown(f"<h1 style='color: #dc3545; margin-top: 0px;'>{data['suma_naklady']:,.2f} Kč</h1>",
+                    unsafe_allow_html=True)
 
-        with c1:
-            st.markdown(f"<h3 style='border-bottom: 3px solid #dc3545;'>Náklady</h3>", unsafe_allow_html=True)
-            st.markdown(f"<h2 style='color: #dc3545;'>{data['suma_naklady']:,.2f} Kč</h2>", unsafe_allow_html=True)
-            if data['naklady']:
-                df = pd.DataFrame(data['naklady'])
-                df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
-                df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
-                df = df[['Účet', 'Název', 'Částka']]
-                st.dataframe(df, hide_index=True, use_container_width=True)
-            else:
-                st.info("Žádné náklady.")
+        if data['naklady']:
+            df = pd.DataFrame(data['naklady'])
+            df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
+            df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
+            df = df[['Účet', 'Název', 'Částka']]
+            st.dataframe(df, hide_index=True, use_container_width=True)
+        else:
+            st.info("Žádné náklady.")
 
-        with c2:
-            st.markdown(f"<h3 style='border-bottom: 3px solid #28a745;'>Výnosy</h3>", unsafe_allow_html=True)
-            st.markdown(f"<h2 style='color: #28a745;'>{data['suma_vynosy']:,.2f} Kč</h2>", unsafe_allow_html=True)
-            if data['vynosy']:
-                df = pd.DataFrame(data['vynosy'])
-                df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
-                df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
-                df = df[['Účet', 'Název', 'Částka']]
-                st.dataframe(df, hide_index=True, use_container_width=True)
-            else:
-                st.info("Žádné výnosy.")
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # --- VÝNOSY ---
+        st.markdown(
+            f"<h3 style='border-bottom: 3px solid #28a745; padding-bottom: 5px; margin-bottom: 10px;'>Výnosy</h3>",
+            unsafe_allow_html=True)
+        st.markdown(f"<h1 style='color: #28a745; margin-top: 0px;'>{data['suma_vynosy']:,.2f} Kč</h1>",
+                    unsafe_allow_html=True)
+
+        if data['vynosy']:
+            df = pd.DataFrame(data['vynosy'])
+            df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
+            df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
+            df = df[['Účet', 'Název', 'Částka']]
+            st.dataframe(df, hide_index=True, use_container_width=True)
+        else:
+            st.info("Žádné výnosy.")
 
     # =========================================================
-    # 2. ROZVAHA (VERTIKÁLNÍ DESIGN)
+    # 2. ROZVAHA (BANNER SHODY + VERTIKÁLNÍ TABULKY)
     # =========================================================
     with tab_rozvaha:
         rozdil = data['suma_aktiva'] - data['suma_pasiva']
         bilance_ok = abs(rozdil) < 0.02
 
-        if not bilance_ok:
-            st.error(f"⚠️ Neshoda v bilanci: Rozdíl {rozdil:,.2f} Kč")
+        # --- LOGIKA BAREV A TEXTU PRO BANNER ---
+        if bilance_ok:
+            # Zelený styl (Vše OK)
+            barva_ban = "#28a745"
+            bg_ban = "rgba(40, 167, 69, 0.1)"
+            nadpis_ban = "STAV BILANCE"
+            text_ban = "BILANCE JE VYROVNANÁ (OK)"
         else:
-            st.success("✅ Bilance je vyrovnaná.")
+            # Červený styl (Chyba)
+            barva_ban = "#dc3545"
+            bg_ban = "rgba(220, 53, 69, 0.1)"
+            nadpis_ban = "⚠️ NESHODA V BILANCI"
+            text_ban = f"ROZDÍL: {rozdil:,.2f} Kč"
 
-        st.markdown("")
+        # --- HTML BANNER PRO BILANCI ---
+        st.markdown(
+            f"""
+            <div style="background-color: {bg_ban}; padding: 15px; border-radius: 8px; border-left: 5px solid {barva_ban}; text-align: center; margin-bottom: 30px;">
+                <h4 style="margin:0; color: #888;">{nadpis_ban}</h4>
+                <h1 style="margin:0; color: {barva_ban}; font-size: 2.2em;">{text_ban}</h1>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
         # -----------------------------------------------------
         # SEKCE 1: AKTIVA (Modrá)
         # -----------------------------------------------------
-        # Podtržení nadpisu modrou barvou (#007bff)
         st.markdown(
             f"<h3 style='border-bottom: 3px solid #007bff; padding-bottom: 5px; margin-bottom: 10px;'>Aktiva (Majetek)</h3>",
-            unsafe_allow_html=True
-        )
-
-        # Celková suma Aktiv
-        st.markdown(
-            f"<h1 style='color: #007bff; margin-top: 0px;'>{data['suma_aktiva']:,.2f} Kč</h1>",
-            unsafe_allow_html=True
-        )
+            unsafe_allow_html=True)
+        st.markdown(f"<h1 style='color: #007bff; margin-top: 0px;'>{data['suma_aktiva']:,.2f} Kč</h1>",
+                    unsafe_allow_html=True)
 
         if data['aktiva']:
             df = pd.DataFrame(data['aktiva'])
@@ -451,7 +472,6 @@ def zobrazit_reporty():
             df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
             df_final = df[['Účet', 'Název', 'Částka']]
 
-            # Tabulka na celou šířku
             st.dataframe(
                 df_final,
                 hide_index=True,
@@ -465,37 +485,28 @@ def zobrazit_reporty():
         else:
             st.info("Žádná aktiva.")
 
-        # Mezera mezi sekcemi
-        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
         # -----------------------------------------------------
-        # SEKCE 2: PASIVA (Žlutá/Oranžová)
+        # SEKCE 2: PASIVA (Žlutá)
         # -----------------------------------------------------
-        # Podtržení nadpisu žlutou barvou (#ffc107)
         st.markdown(
             f"<h3 style='border-bottom: 3px solid #ffc107; padding-bottom: 5px; margin-bottom: 10px;'>Pasiva (Zdroje)</h3>",
-            unsafe_allow_html=True
-        )
-
-        # Celková suma Pasiv
-        st.markdown(
-            f"<h1 style='color: #ffc107; margin-top: 0px;'>{data['suma_pasiva']:,.2f} Kč</h1>",
-            unsafe_allow_html=True
-        )
+            unsafe_allow_html=True)
+        st.markdown(f"<h1 style='color: #ffc107; margin-top: 0px;'>{data['suma_pasiva']:,.2f} Kč</h1>",
+                    unsafe_allow_html=True)
 
         if data['pasiva']:
             df = pd.DataFrame(data['pasiva'])
 
-            # --- FILTR: ODSTRANĚNÍ HV Z TABULKY ---
+            # FILTR: Odstranění HV z tabulky Pasiv
             df = df[df['ucet'] != 'HV']
-            # ---------------------------------------
 
             if not df.empty:
                 df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
                 df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
                 df_final = df[['Účet', 'Název', 'Částka']]
 
-                # Tabulka na celou šířku
                 st.dataframe(
                     df_final,
                     hide_index=True,
