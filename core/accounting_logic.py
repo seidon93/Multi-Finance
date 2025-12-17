@@ -840,7 +840,7 @@ class AccountingEngine:
             return {'CELKEM': Decimal('0.0')}
 
     def get_report_data(self, datum_od=None, datum_do=None, detailni=True):
-        """Vrací data pro reporty s podporou agregace analytiky."""
+        """Vrací data pro reporty s automatickým zahrnutím HV do pasiv (ČSÚ)."""
         sql = """
             SELECT P.ucet, R.nazev, R.typ_uctu, SUM(P.castka), P.smer
             FROM UcetniPohyby P 
@@ -850,10 +850,10 @@ class AccountingEngine:
         """
         params = [self.klient_id]
         if datum_od:
-            sql += " AND T.datum >= ?";
+            sql += " AND T.datum >= ?"
             params.append(datum_od)
         if datum_do:
-            sql += " AND T.datum <= ?";
+            sql += " AND T.datum <= ?"
             params.append(datum_do)
 
         sql += " GROUP BY P.ucet, R.nazev, R.typ_uctu, P.smer"
@@ -862,101 +862,166 @@ class AccountingEngine:
             rows = execute_query(sql, tuple(params))
             rep = {
                 'aktiva': [], 'pasiva': [], 'naklady': [], 'vynosy': [],
-                'suma_aktiva': 0.0, 'suma_pasiva': 0.0, 'suma_naklady': 0.0, 'suma_vynosy': 0.0
+                'suma_aktiva': 0.0, 'suma_pasiva': 0.0, 'suma_naklady': 0.0, 'suma_vynosy': 0.0,
+                'hospodarsky_vysledek': 0.0
             }
 
             temp = defaultdict(lambda: {'bal': 0.0, 'typ': 'S', 'nazev': ''})
 
             for r in rows:
                 u_raw = str(r[0])
-                # Pokud není detailní, sečteme pod hlavní účet (např. 501.001 -> 501)
                 u = u_raw if detailni else u_raw.split('.')[0]
-
                 val = float(r[3])
                 smer = r[4]
 
                 temp[u]['typ'] = r[2] if r[2] else 'S'
-                # Pro agregovaný název zkusíme najít název syntetiky, jinak necháme původní
                 if not detailni and '.' in u_raw:
                     temp[u]['nazev'] = self.get_ucet_nazev(u)
                 else:
                     temp[u]['nazev'] = r[1] if r[1] else u_raw
 
+                # Standardní MD/D logika zůstatků
                 if smer == 'MD':
                     temp[u]['bal'] += val
                 else:
                     temp[u]['bal'] -= val
 
             for u, data in temp.items():
-                b = data['bal'];
-                t = data['typ'];
+                b = data['bal']
+                t = data['typ']
                 n = data['nazev']
+
                 if abs(b) < 0.005: continue
                 item = {'ucet': u, 'nazev': n, 'castka': abs(b)}
 
                 if t == 'A':
-                    rep['aktiva'].append(item); rep['suma_aktiva'] += b
+                    rep['aktiva'].append(item)
+                    rep['suma_aktiva'] += b
                 elif t in ['P', 'P*', 'Z']:
-                    rep['pasiva'].append(item); rep['suma_pasiva'] += abs(b)
+                    # Pasiva mají standardně záporný bal v DB (proto abs)
+                    rep['pasiva'].append(item)
+                    rep['suma_pasiva'] += abs(b)
                 elif t == 'N':
-                    rep['naklady'].append(item); rep['suma_naklady'] += abs(b)
+                    rep['naklady'].append(item)
+                    rep['suma_naklady'] += abs(b)
                 elif t == 'V':
-                    rep['vynosy'].append(item); rep['suma_vynosy'] += abs(b)
+                    rep['vynosy'].append(item)
+                    rep['suma_vynosy'] += abs(b)
 
-            rep['hospodarsky_vysledek'] = rep['suma_vynosy'] - rep['suma_naklady']
+            # 1. Výpočet Hospodářského výsledku (Zisk = Výnosy - Náklady)
+            hv = rep['suma_vynosy'] - rep['suma_naklady']
+            rep['hospodarsky_vysledek'] = hv
+
+            # 2. KLÍČOVÝ KROK: Zahrnutí HV do Pasiv (Vlastní kapitál)
+            # Podle českých standardů musí HV uzavírat rozvahu.
+            hv_item = {
+                'ucet': 'HV',
+                'nazev': 'Hospodářský výsledek (zisk/ztráta)',
+                'castka': hv  # Zde necháváme znaménko pro zobrazení (kladné = zisk)
+            }
+            rep['pasiva'].append(hv_item)
+
+            # 3. Přepočet celkových pasiv (přičteme zisk nebo odečteme ztrátu)
+            rep['suma_pasiva'] += hv
+
             return rep
         except Exception as e:
             print(f"Chyba v get_report_data: {e}")
             return None
 
+    def validuj_ceske_standardy(self, ucet_md, ucet_dal):
+        """
+        Provádí validaci účetních zápisů podle českých standardů a zvyklostí.
+        Vyhazuje ValueError v případě nepřípustné kontace.
+        """
+        u_md = str(ucet_md)
+        u_dal = str(ucet_dal)
+
+        # Definice skupin účtů
+        penezni_skupiny = ('211', '221', '213')  # Pokladny, bankovní účty, ceniny
+        vysledovkovy_prefix = ('5', '6')  # Náklady a výnosy
+
+        # KONTROLA A: Převody peněz (vždy přes 261)
+        # Nelze účtovat 211/221 přímo. Musí se použít MD 261 / D 211 nebo MD 221 / D 261.
+        if any(u_md.startswith(p) for p in penezni_skupiny) and \
+                any(u_dal.startswith(p) for p in penezni_skupiny):
+            raise ValueError(
+                "CHYBA (Standard ČR): Přímý převod mezi pokladnou a bankou není povolen. "
+                "Použijte zúčtovací účet 261 (Peníze na cestě)."
+            )
+
+        # KONTROLA B: Výsledovkové účty proti sobě
+        # V ČR se zásadně neúčtuje MD 5xx / D 6xx. Náklady a výnosy jdou vždy proti rozvaze.
+        if u_md.startswith(vysledovkovy_prefix) and u_dal.startswith(vysledovkovy_prefix):
+            raise ValueError(
+                "CHYBA (Standard ČR): Nelze účtovat nákladový účet přímo proti výnosovému. "
+                "Operace musí být zachycena přes příslušný rozvahový účet (pohledávka, závazek, peníze)."
+            )
+
+        # KONTROLA C: Přímé účtování na závěrkové účty (mimo uzávěrku)
+        zaverkové_ucty = ('701', '702', '710')
+        if (any(u_md.startswith(z) for z in zaverkové_ucty) or \
+                any(u_dal.startswith(z) for z in zaverkové_ucty)):
+            # Tato kontrola je volnější, ale v běžném roce by se na 7xx účtovat nemělo
+            pass
+
+        return True
+
 
     # --- PŘEPRACOVANÁ METODA PRO UKLÁDÁNÍ TRANSAKCE (Nyní s DPH) ---
     def save_transakce(self, datum, popis, doklad_cislo, ucet_md_zaklad, ucet_dal_zaklad, castka_bez_dph, sazba_dph,
                        smer_dph_popis):
-        self.zkontroluj_zda_je_otevreno(datum)
-
-        # Příprava proměnných
-        base = float(castka_bez_dph)
-        tax = 0.0
-        u_dph = None
-        s_dph = None
-        u_opp = None
-        s_opp = None
-
-        # Logika DPH
-        if smer_dph_popis != 'Neučtovat' and float(sazba_dph) > 0.0:
-            tax = base * (float(sazba_dph) / 100)
-            sz = self.get_dph_sazby().get(float(sazba_dph))
-            if not sz:
-                raise ValueError(f"Sazba DPH {sazba_dph}% nenalezena v nastavení.")
-
-            if smer_dph_popis == 'DPH na VSTUPU (MD)':
-                u_dph = sz['vstup']
-                s_dph = 'MD'
-                u_opp = ucet_dal_zaklad
-                s_opp = 'D'
-            else:  # Výstup
-                u_dph = sz['vystup']
-                s_dph = 'D'
-                u_opp = ucet_md_zaklad
-                s_opp = 'MD'
-        else:
-            # Bez DPH
-            if str(ucet_md_zaklad).startswith(('5', '0', '1')):
-                u_opp = ucet_dal_zaklad
-                s_opp = 'D'
-            else:
-                u_opp = ucet_md_zaklad
-                s_opp = 'MD'
-
-        total = base + tax
+        """Uloží transakci do DB s předchozí kontrolou českých standardů."""
 
         try:
+            # 1. ZÁKLADNÍ KONTROLA (Otevřené období)
+            self.zkontroluj_zda_je_otevreno(datum)
+
+            # 2. KONTROLA ČESKÝCH STANDARDŮ (Nová logika)
+            # Pokud neprojde, vyhodí ValueError a skočí do except bloku
+            self.validuj_ceske_standardy(ucet_md_zaklad, ucet_dal_zaklad)
+
+            # 3. PŘÍPRAVA PROMĚNNÝCH
+            base = float(castka_bez_dph)
+            tax = 0.0
+            u_dph = None
+            s_dph = None
+            u_opp = None
+            s_opp = None
+
+            # Logika DPH
+            if smer_dph_popis != 'Neučtovat' and float(sazba_dph) > 0.0:
+                tax = base * (float(sazba_dph) / 100)
+                sz = self.get_dph_sazby().get(float(sazba_dph))
+                if not sz:
+                    raise ValueError(f"Sazba DPH {sazba_dph}% nenalezena v nastavení.")
+
+                if smer_dph_popis == 'DPH na VSTUPU (MD)':
+                    u_dph = sz['vstup']
+                    s_dph = 'MD'
+                    u_opp = ucet_dal_zaklad
+                    s_opp = 'D'
+                else:  # Výstup
+                    u_dph = sz['vystup']
+                    s_dph = 'D'
+                    u_opp = ucet_md_zaklad
+                    s_opp = 'MD'
+            else:
+                # Bez DPH - Určení směru protipoložky (zjednodušená logika)
+                # Pokud MD účet je Aktivum/Náklad, protistrana je Dal
+                if str(ucet_md_zaklad).startswith(('5', '0', '1', '2', '3')):
+                    u_opp = ucet_dal_zaklad
+                    s_opp = 'D'
+                else:
+                    u_opp = ucet_md_zaklad
+                    s_opp = 'MD'
+
+            total = base + tax
+
+            # 4. ZÁPIS DO DATABÁZE
             with Database() as conn:
                 cur = conn.cursor()
 
-                # --- OPRAVA ZDE: Přidáno SET NOCOUNT ON; ---
-                # To zajistí, že dostaneme ID a ne hlášku o počtu řádků
                 sql_hlavicka = """
                     SET NOCOUNT ON;
                     INSERT INTO Transakce (klient_id, datum, popis, doklad_cislo) 
@@ -971,24 +1036,28 @@ class AccountingEngine:
 
                 tid = int(row[0])
 
-                # Vložení pohybů
                 sql_ins = "INSERT INTO UcetniPohyby (transakce_id, klient_id, ucet, smer, castka) VALUES (?,?,?,?,?)"
 
-                # 1. Základ
+                # Pohyb 1: Základ
                 u_z = ucet_md_zaklad if s_opp == 'D' else ucet_dal_zaklad
                 s_z = 'MD' if s_opp == 'D' else 'D'
                 cur.execute(sql_ins, (tid, self.klient_id, u_z, s_z, base))
 
-                # 2. DPH
+                # Pohyb 2: DPH (pokud existuje)
                 if tax > 0 and u_dph:
                     cur.execute(sql_ins, (tid, self.klient_id, u_dph, s_dph, tax))
 
-                # 3. Celkem (Protipoložka)
+                # Pohyb 3: Celková protipoložka (Závazek/Pohledávka/Peníze)
                 cur.execute(sql_ins, (tid, self.klient_id, u_opp, s_opp, total))
 
                 conn.commit()
                 return tid
 
+        except ValueError as ve:
+            # Specifická chyba pro porušení účetních standardů
+            print(f"Validační chyba: {ve}")
+            # V UI se zobrazí tato zpráva uživateli
+            raise ve
         except Exception as e:
             print(f"Save error: {e}")
             return None
