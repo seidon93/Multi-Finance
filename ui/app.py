@@ -691,84 +691,170 @@ def zobrazit_prehled_dph():
 
 
 def zobrazit_historii_uctu():
-    import pandas as pd
+    st.header("Historie a Editace Transakcí")
 
-    st.header("Historie Účtu (Detailní Přehled)")
+    # --- 1. SEKCE FILTRŮ ---
+    st.subheader("🔍 Vyhledat transakce")
 
-    date_from, date_to = time_filter_ui()
-
-    zustatky_all_filtrovane = engine.spocti_zustatky(datum_od=None, datum_do=date_to)
-    zustatky_all_komplet = engine.spocti_zustatky()
-    seznam_uctu_s_pohybem = [ucet for ucet, zustatek in zustatky_all_komplet.items() if abs(zustatek) > 0.005]
-    seznam_uctu_s_pohybem = sorted(seznam_uctu_s_pohybem)
-
-    if not seznam_uctu_s_pohybem:
-        st.info("Žádný účet nemá aktuálně nenulový zůstatek pro zobrazení historie.")
-        return
-
-    # --- ZABEZPEČENÍ VÝBĚRU ÚČTŮ V SESSION STATE ---
-    if 'vybrane_ucty' not in st.session_state:
-        # Nastavíme defaultní výběr při prvním načtení
-        default_vyber = [u for u in ['221', '321', '311'] if u in seznam_uctu_s_pohybem] or []
-        st.session_state['vybrane_ucty'] = default_vyber
-
-    st.subheader("1. Výběr účtů pro detailní přehled")
-
-    # Nyní používáme st.session_state['vybrane_ucty'] jako default
-    vybrane_ucty_k_zobrazeni = st.multiselect(
-        "Vyberte účty, jejichž historii chcete zobrazit:",
-        options=seznam_uctu_s_pohybem,
-        default=st.session_state['vybrane_ucty'],  # <- Používáme uloženou hodnotu
-        key='historie_multiselect_ucet'
+    # Volba metody vyhledávání
+    metoda = st.radio(
+        "Podle čeho chcete hledat?",
+        ["📅 Podle data transakce", "📄 Podle čísla dokladu (Faktury)", "👤 Podle Klienta (ID)"],
+        horizontal=True
     )
 
-    # Důležité: Uložíme novou hodnotu zpět, i když Streamlit to dělá automaticky s klíčem,
-    # pro zajištění, že se po rerunu použije správná sada.
-    st.session_state['vybrane_ucty'] = vybrane_ucty_k_zobrazeni
-    # --- KONEC ZABEZPEČENÍ ---
+    # Základní SQL dotaz (vybíráme 5 sloupců)
+    sql_base = """
+        SELECT T.id, T.datum, T.doklad_cislo, T.popis, SUM(P.castka) as Objem
+        FROM Transakce T
+        JOIN UcetniPohyby P ON T.id = P.transakce_id
+        WHERE 1=1
+    """
+    params = []
 
-    if not vybrane_ucty_k_zobrazeni:
-        st.warning("Prosím, vyberte alespoň jeden účet k zobrazení.")
+    # --- LOGIKA FILTRŮ ---
+    if metoda == "📅 Podle data transakce":
+        # Použijeme existující časový filtr
+        date_from, date_to = time_filter_ui()
+
+        # OPRAVA 1: Kontrola, zda máme data, než zavoláme strftime
+        if not date_from or not date_to:
+            st.info("Zvolte prosím časové období.")
+            return
+
+        # SQL podmínka
+        sql_base += " AND T.klient_id = ? AND T.datum >= ? AND T.datum <= ?"
+        params = [KLIENT_ID, date_from.strftime('%Y-%m-%d'), date_to.strftime('%Y-%m-%d')]
+
+    elif metoda == "📄 Podle čísla dokladu (Faktury)":
+        col_search, _ = st.columns([2, 1])
+        hledany_text = col_search.text_input("Zadejte číslo dokladu (nebo jeho část):", placeholder="např. FP-2025")
+
+        # SQL podmínka
+        sql_base += " AND T.klient_id = ? AND T.doklad_cislo LIKE ?"
+        params = [KLIENT_ID, f"%{hledany_text}%"]
+
+        if not hledany_text:
+            st.info("Zadejte alespoň jeden znak pro vyhledání.")
+            return
+
+    elif metoda == "👤 Podle Klienta (ID)":
+        st.caption(f"Aktuálně přihlášený klient ID: {KLIENT_ID}")
+        sql_base += " AND T.klient_id = ?"
+        params = [KLIENT_ID]
+
+    # --- DOKONČENÍ SQL (Grupování a řazení) ---
+    sql_base += " GROUP BY T.id, T.datum, T.doklad_cislo, T.popis ORDER BY T.datum DESC, T.id DESC"
+
+    # --- 2. VYKONÁNÍ DOTAZU ---
+    from core.database import execute_query
+
+    try:
+        rows = execute_query(sql_base, tuple(params))
+    except Exception as e:
+        st.error(f"Chyba při vyhledávání: {e}")
         return
 
-    st.subheader("2. Detailní pohyby")
+    if not rows:
+        st.warning("⚠️ Žádné transakce nebyly nalezeny.")
+        return
 
-    for ucet_k_zobrazeni in vybrane_ucty_k_zobrazeni:
+    # OPRAVA 2: Převedeme pyodbc Row objekty na standardní tuple
+    # Tím zajistíme, že Pandas pochopí, že jde o 5 sloupců, ne o 1 objekt
+    rows_clean = [tuple(r) for r in rows]
 
-        pohyby = engine.get_pohyby_uctu(ucet_k_zobrazeni, datum_od=date_from, datum_do=date_to)
-        aktualni_zustatek = zustatky_all_filtrovane.get(ucet_k_zobrazeni, 0)
+    # --- 3. VÝPIS NALEZENÝCH DAT (TABULKA) ---
+    st.success(f"Nalezeno {len(rows_clean)} záznamů.")
 
-        css_class_zustatek = "zustatek-kladny" if aktualni_zustatek >= 0 else "zustatek-zaporny"
+    # Nyní už shape (tvar) bude sedět (N, 5)
+    df = pd.DataFrame(rows_clean, columns=["ID", "Datum", "Doklad", "Popis", "Objem (pohyby)"])
 
-        st.markdown(
-            f'<p class="ucet-nazev">'
-            f'Pohyby účtu {ucet_k_zobrazeni} ({engine.get_ucet_nazev(ucet_k_zobrazeni)})'
-            f'</p>'
-            f'<p>Aktuální zůstatek: <span class="{css_class_zustatek}">{aktualni_zustatek:,.2f} Kč</span></p>',
-            unsafe_allow_html=True
-        )
+    # Formátování
+    if not df.empty:
+        df['Datum'] = pd.to_datetime(df['Datum']).dt.date
+        df['Objem (pohyby)'] = df['Objem (pohyby)'].apply(lambda x: f"{x:,.2f} Kč")
 
-        if pohyby:
-            df_pohyby = pd.DataFrame(pohyby)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
-            if 'Částka' in df_pohyby.columns:
-                try:
-                    df_pohyby['Částka'] = df_pohyby['Částka'].astype(float)
-                except:
-                    pass
+    st.markdown("---")
 
-                # Formátování na string s měnou
-                df_pohyby['Částka'] = df_pohyby['Částka'].apply(lambda x: f'{x:,.2f} Kč')
+    # --- 4. SEKCE EDITACE ---
+    st.subheader("✏️ Upravit vybranou transakci")
 
-            required_cols = ['Datum', 'Doklad Číslo', 'Popis Transakce', 'Částka']
-            if 'Název Účtu' in df_pohyby.columns:
-                required_cols.append('Název Účtu')
+    # Selectbox se seznamem
+    moznosti = [f"{r[2]} | {r[1]} | {r[3]} (ID: {r[0]})" for r in rows_clean]
+    vybrana_str = st.selectbox("Vyberte ze seznamu výše:", moznosti)
 
-            df_pohyby = df_pohyby[required_cols]
-            st.dataframe(df_pohyby, width='stretch', hide_index=True)
+    if vybrana_str:
+        import re
+        match = re.search(r"\(ID: (\d+)\)", vybrana_str)
+        if match:
+            transakce_id = int(match.group(1))
 
-        else:
-            st.info(f"Na účtu {ucet_k_zobrazeni} nebyly nalezeny žádné pohyby v období od {date_from} do {date_to}.")
+            # --- FORMULÁŘ ---
+            detail = engine.get_transakce_detail(transakce_id)
+
+            if detail:
+                with st.form(key=f"edit_form_{transakce_id}"):
+                    st.markdown(f"**Editujete doklad:** `{detail['doklad']}` ze dne `{detail['datum']}`")
+
+                    c1, c2 = st.columns(2)
+                    new_doklad = c1.text_input("Doklad", value=detail['doklad'])
+                    new_datum = c2.date_input("Datum", value=detail['datum'])
+                    new_popis = st.text_area("Popis", value=detail['popis'])
+
+                    st.markdown("---")
+                    st.markdown("**Účetní data (Zadejte novou správnou kontaci):**")
+
+                    tridy_uctu = ["0 - Dlouhodobý majetek", "1 - Zásoby", "2 - Finanční účty", "3 - Zúčtovací vztahy",
+                                  "4 - Kapitálové účty", "5 - Náklady", "6 - Výnosy"]
+
+                    ce1, ce2 = st.columns(2)
+                    with ce1:
+                        md_trida = st.selectbox("Třída MD", tridy_uctu, key=f"e_md_t_{transakce_id}")
+                        ucty_md = engine.get_ucty_podle_tridy(md_trida.split(" - ")[0])
+                        sel_md = st.selectbox("Účet MD", ucty_md, key=f"e_md_u_{transakce_id}")
+                        ucet_md_fin = sel_md.split(" - ")[0] if sel_md else ""
+
+                    with ce2:
+                        d_trida = st.selectbox("Třída D", tridy_uctu, index=2, key=f"e_d_t_{transakce_id}")
+                        ucty_d = engine.get_ucty_podle_tridy(d_trida.split(" - ")[0])
+                        sel_d = st.selectbox("Účet D", ucty_d, key=f"e_d_u_{transakce_id}")
+                        ucet_dal_fin = sel_d.split(" - ")[0] if sel_d else ""
+
+                    odhad = 0.0
+                    if detail['pohyby']:
+                        odhad = max([p['castka'] for p in detail['pohyby']])
+
+                    c_money, c_dph = st.columns(2)
+                    new_castka = c_money.number_input("Částka základu (bez DPH)", value=float(odhad), min_value=0.0)
+
+                    dph_sazby = engine.get_dph_sazby()
+                    dph_opts = sorted(list(dph_sazby.keys()), reverse=True)
+                    new_sazba = c_dph.selectbox("Sazba DPH", dph_opts, key=f"e_dph_s_{transakce_id}")
+                    new_smer_dph = c_dph.radio("Typ DPH", ['Neučtovat', 'DPH na VSTUPU (MD)', 'DPH na VÝSTUPU (D)'],
+                                               key=f"e_dph_r_{transakce_id}")
+
+                    st.markdown("")
+                    save_btn = st.form_submit_button("💾 Uložit opravu", type="primary")
+
+                    if save_btn:
+                        try:
+                            engine.upravit_transakci(
+                                transakce_id=transakce_id,
+                                nove_datum=new_datum,
+                                novy_popis=new_popis,
+                                novy_doklad=new_doklad,
+                                ucet_md=ucet_md_fin,
+                                ucet_dal=ucet_dal_fin,
+                                castka=new_castka,
+                                sazba_dph=new_sazba,
+                                smer_dph_popis=new_smer_dph
+                            )
+                            st.success("✅ Změna uložena!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Chyba: {e}")
 
 
 def zobrazit_uzaverku():

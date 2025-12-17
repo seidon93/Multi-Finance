@@ -32,6 +32,164 @@ class AccountingEngine:
                 print("✅ Databáze úspěšně aktualizována.")
         except Exception as e:
             print(f"Chyba při kontrole/opravě DB: {e}")
+
+        audit_sql = """
+                IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='AuditLog' AND xtype='U')
+                CREATE TABLE AuditLog (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    transakce_id INT,
+                    datum_zmeny DATETIME DEFAULT GETDATE(),
+                    typ_akce NVARCHAR(50), -- 'EDIT', 'DELETE'
+                    puvodni_data NVARCHAR(MAX), -- Uložíme sem starý stav jako text/JSON
+                    novy_data NVARCHAR(MAX) -- Uložíme sem nový stav
+                );
+                """
+        try:
+            with Database() as conn:
+                cursor = conn.cursor()
+                cursor.execute(audit_sql)
+                conn.commit()
+        except Exception as e:
+            print(f"Chyba při vytváření AuditLog: {e}")
+
+    def get_transakce_detail(self, transakce_id):
+        """Vrátí kompletní info o transakci včetně účtů pro editaci."""
+        sql = """
+            SELECT T.datum, T.doklad_cislo, T.popis, 
+                   P.ucet, P.smer, P.castka
+            FROM Transakce T
+            JOIN UcetniPohyby P ON T.id = P.transakce_id
+            WHERE T.id = ?
+        """
+        try:
+            results = execute_query(sql, (transakce_id,))
+            if not results:
+                return None
+
+            # Hlavička je stejná pro všechny řádky
+            hlavicka = {
+                'id': transakce_id,
+                'datum': results[0][0],
+                'doklad': results[0][1],
+                'popis': results[0][2],
+                'pohyby': []
+            }
+
+            # Rozparsujeme pohyby, abychom našli MD, D a DPH
+            # Toto je zjednodušená logika pro zobrazení v editoru
+            for row in results:
+                hlavicka['pohyby'].append({
+                    'ucet': row[3],
+                    'smer': row[4],
+                    'castka': float(row[5])
+                })
+
+            return hlavicka
+        except Exception as e:
+            print(f"Chyba detailu transakce: {e}")
+            return None
+
+    def upravit_transakci(self, transakce_id, nove_datum, novy_popis, novy_doklad,
+                          ucet_md, ucet_dal, castka, sazba_dph, smer_dph_popis):
+        """
+        Provede bezpečnou editaci:
+        1. Zkontroluje uzávěrku (pro staré i nové datum).
+        2. Uloží starý stav do AuditLog.
+        3. Aktualizuje hlavičku.
+        4. Smaže staré pohyby a vytvoří nové (nejčistší cesta).
+        """
+
+        # 1. Načteme starý stav (pro log a kontrolu data)
+        stary_stav = self.get_transakce_detail(transakce_id)
+        if not stary_stav:
+            raise ValueError("Transakce neexistuje.")
+
+        # 2. Kontrola uzávěrky (Musí být otevřeno pro STARÉ i NOVÉ datum)
+        # Pokud měním datum z prosince na leden, musí být otevřený i prosinec!
+        self.zkontroluj_zda_je_otevreno(stary_stav['datum'])
+        self.zkontroluj_zda_je_otevreno(nove_datum)
+
+        # 3. Příprava popisu pro AuditLog (zjednodušený string)
+        log_old = f"Datum: {stary_stav['datum']}, Doklad: {stary_stav['doklad']}, Částka: {stary_stav['pohyby'][0]['castka']}"
+        log_new = f"Datum: {nove_datum}, Doklad: {novy_doklad}, Částka: {castka}"
+
+        # 4. SQL Operace (v jedné transakci)
+        try:
+            with Database() as conn:
+                cursor = conn.cursor()
+
+                # A) Zápis do AuditLog
+                cursor.execute("""
+                    INSERT INTO AuditLog (transakce_id, typ_akce, puvodni_data, novy_data)
+                    VALUES (?, 'EDIT', ?, ?)
+                """, (transakce_id, log_old, log_new))
+
+                # B) Update hlavičky
+                cursor.execute("""
+                    UPDATE Transakce 
+                    SET datum = ?, popis = ?, doklad_cislo = ?
+                    WHERE id = ?
+                """, (nove_datum, novy_popis, novy_doklad, transakce_id))
+
+                # C) Smazání starých pohybů (nejjednodušší způsob jak přepsat účty/částky)
+                cursor.execute("DELETE FROM UcetniPohyby WHERE transakce_id = ?", (transakce_id,))
+
+                # D) Výpočet nových částek (Stejná logika jako v save_transakce)
+                castka_zaklad = float(castka)
+                castka_dph = 0.0
+                ucet_dph = None
+                smer_dph = None
+
+                # Logika DPH (zkopírována a zjednodušena)
+                if smer_dph_popis != 'Neučtovat' and float(sazba_dph) > 0.0:
+                    castka_dph = castka_zaklad * (float(sazba_dph) / 100)
+                    sazby = self.get_dph_sazby()
+                    info = sazby.get(float(sazba_dph))
+
+                    if smer_dph_popis == 'DPH na VSTUPU (MD)':
+                        ucet_dph = info['vstup']
+                        smer_dph = 'MD'
+                        ucet_protipolozka = ucet_dal
+                        smer_protipolozka = 'D'
+                    else:
+                        ucet_dph = info['vystup']
+                        smer_dph = 'D'
+                        ucet_protipolozka = ucet_md
+                        smer_protipolozka = 'MD'
+                else:
+                    # Bez DPH
+                    if ucet_md.startswith('5') or ucet_md.startswith('0') or ucet_md.startswith('1'):
+                        ucet_protipolozka = ucet_dal
+                        smer_protipolozka = 'D'
+                    else:
+                        ucet_protipolozka = ucet_md
+                        smer_protipolozka = 'MD'
+
+                castka_celkem = castka_zaklad + castka_dph
+
+                sql_pohyb = "INSERT INTO UcetniPohyby (transakce_id, klient_id, ucet, smer, castka) VALUES (?, ?, ?, ?, ?)"
+
+                # 1. Základ
+                ucet_zaklad = ucet_md if smer_protipolozka == 'D' else ucet_dal
+                smer_zaklad = 'MD' if smer_protipolozka == 'D' else 'D'
+                cursor.execute(sql_pohyb, (transakce_id, self.klient_id, ucet_zaklad, smer_zaklad, castka_zaklad))
+
+                # 2. DPH
+                if castka_dph > 0 and ucet_dph:
+                    cursor.execute(sql_pohyb, (transakce_id, self.klient_id, ucet_dph, smer_dph, castka_dph))
+
+                # 3. Celkem
+                cursor.execute(sql_pohyb,
+                               (transakce_id, self.klient_id, ucet_protipolozka, smer_protipolozka, castka_celkem))
+
+                conn.commit()
+                return True
+
+        except Exception as e:
+            print(f"Chyba při editaci: {e}")
+            raise e
+
+
     def get_ucty_podle_tridy(self, trida_prefix):
         """
         Vrátí seznam účtů, které začínají daným číslem (např. '2' pro třídu 2).
