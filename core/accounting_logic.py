@@ -527,7 +527,7 @@ class AccountingEngine:
             ('701', 'Počáteční účet rozvažný', 'Z'),
             ('702', 'Konečný účet rozvažný', 'Z'),
             ('710', 'Účet zisků a ztrát', 'Z'),
-            ('799', 'Evidenční účet', 'P')
+            ('799', 'Evidenční účet', 'P*')
         ]
 
         inserted_count = 0
