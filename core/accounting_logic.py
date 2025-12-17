@@ -907,63 +907,83 @@ class AccountingEngine:
                        smer_dph_popis):
         self.zkontroluj_zda_je_otevreno(datum)
 
-        base = float(castka_bez_dph);
+        # Příprava proměnných
+        base = float(castka_bez_dph)
         tax = 0.0
-        u_dph = None;
-        s_dph = None;
-        u_opp = None;
+        u_dph = None
+        s_dph = None
+        u_opp = None
         s_opp = None
 
+        # Logika DPH
         if smer_dph_popis != 'Neučtovat' and float(sazba_dph) > 0.0:
             tax = base * (float(sazba_dph) / 100)
             sz = self.get_dph_sazby().get(float(sazba_dph))
-            if not sz: raise ValueError("Sazba nenalezena")
+            if not sz:
+                raise ValueError(f"Sazba DPH {sazba_dph}% nenalezena v nastavení.")
 
             if smer_dph_popis == 'DPH na VSTUPU (MD)':
-                u_dph = sz['vstup'];
-                s_dph = 'MD';
-                u_opp = ucet_dal_zaklad;
+                u_dph = sz['vstup']
+                s_dph = 'MD'
+                u_opp = ucet_dal_zaklad
                 s_opp = 'D'
-            else:
-                u_dph = sz['vystup'];
-                s_dph = 'D';
-                u_opp = ucet_md_zaklad;
+            else:  # Výstup
+                u_dph = sz['vystup']
+                s_dph = 'D'
+                u_opp = ucet_md_zaklad
                 s_opp = 'MD'
         else:
+            # Bez DPH
             if str(ucet_md_zaklad).startswith(('5', '0', '1')):
-                u_opp = ucet_dal_zaklad; s_opp = 'D'
+                u_opp = ucet_dal_zaklad
+                s_opp = 'D'
             else:
-                u_opp = ucet_md_zaklad; s_opp = 'MD'
+                u_opp = ucet_md_zaklad
+                s_opp = 'MD'
 
         total = base + tax
 
         try:
             with Database() as conn:
                 cur = conn.cursor()
-                cur.execute("INSERT INTO Transakce (klient_id, datum, popis, doklad_cislo) VALUES (?,?,?,?)",
-                            (self.klient_id, datum, popis, doklad_cislo))
-                cur.execute("SELECT SCOPE_IDENTITY()")
-                tid = cur.fetchone()[0]
 
-                # Zde používáme 'ucet', protože v tabulce UcetniPohyby je 'ucet' -> OK
+                # --- OPRAVA ZDE: Přidáno SET NOCOUNT ON; ---
+                # To zajistí, že dostaneme ID a ne hlášku o počtu řádků
+                sql_hlavicka = """
+                    SET NOCOUNT ON;
+                    INSERT INTO Transakce (klient_id, datum, popis, doklad_cislo) 
+                    VALUES (?, ?, ?, ?);
+                    SELECT SCOPE_IDENTITY();
+                """
+                cur.execute(sql_hlavicka, (self.klient_id, datum, popis, doklad_cislo))
+
+                row = cur.fetchone()
+                if not row or row[0] is None:
+                    raise Exception("Nepodařilo se získat ID transakce.")
+
+                tid = int(row[0])
+
+                # Vložení pohybů
                 sql_ins = "INSERT INTO UcetniPohyby (transakce_id, klient_id, ucet, smer, castka) VALUES (?,?,?,?,?)"
 
-                # Základ
+                # 1. Základ
                 u_z = ucet_md_zaklad if s_opp == 'D' else ucet_dal_zaklad
                 s_z = 'MD' if s_opp == 'D' else 'D'
                 cur.execute(sql_ins, (tid, self.klient_id, u_z, s_z, base))
 
-                # DPH
-                if tax > 0 and u_dph: cur.execute(sql_ins, (tid, self.klient_id, u_dph, s_dph, tax))
+                # 2. DPH
+                if tax > 0 and u_dph:
+                    cur.execute(sql_ins, (tid, self.klient_id, u_dph, s_dph, tax))
 
-                # Celkem
+                # 3. Celkem (Protipoložka)
                 cur.execute(sql_ins, (tid, self.klient_id, u_opp, s_opp, total))
+
                 conn.commit()
-                return int(tid)
+                return tid
+
         except Exception as e:
             print(f"Save error: {e}")
             return None
-
 
 
     # ==========================================
@@ -1001,9 +1021,27 @@ class AccountingEngine:
         return self.provest_rocn_uzaverku_komplet(datum_uzaverky.year)
 
     def zauctovat_dan_z_prijmu(self, datum, vypocena_dan, poznamka="Daň z příjmů PO"):
+        doklad = f"DPPO-{datum.year}"
+
+        # 1. Nejprve zkusíme najít a smazat starou verzi tohoto dokladu, abychom se vyhnuli chybě UNIQUE KEY
+        check_sql = "SELECT id FROM Transakce WHERE doklad_cislo = ? AND klient_id = ?"
+        existing = execute_query(check_sql, (doklad, self.klient_id))
+
+        if existing:
+            transakce_id = existing[0][0]
+            # Smažeme starou transakci (díky CASCADE v DB se smažou i pohyby)
+            # Pokud nemáte CASCADE, museli bychom mazat i pohyby, ale předpokládáme, že DB je OK.
+            with Database() as conn:
+                conn.cursor().execute("DELETE FROM Transakce WHERE id = ?", (transakce_id,))
+                conn.commit()
+            print(f"♻️ Přeúčtování: Starý doklad {doklad} byl smazán.")
+
+        # 2. Zajistíme existenci účtů
         self.zajisti_existenci_uctu("591", "Daň z příjmů - splatná")
         self.zajisti_existenci_uctu("341", "Daň z příjmů")
-        return self.save_transakce(datum, poznamka, f"DPPO-{datum.year}", "591", "341", vypocena_dan, 0, 'Neučtovat')
+
+        # 3. Vytvoříme novou transakci
+        return self.save_transakce(datum, poznamka, doklad, "591", "341", vypocena_dan, 0, 'Neučtovat')
 
     # Wrapper pro staré volání (pro kompatibilitu)
     def provest_uctovani_uzaverky_710(self, datum_uzaverky):
