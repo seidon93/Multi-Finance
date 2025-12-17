@@ -864,12 +864,12 @@ def zobrazit_historii_uctu():
 
 
 def zobrazit_uzaverku():
-    st.header("🔒 Správa Účetních Období & Závěrka")
+    st.header("🔒 Správa Účetních Období & Roční Závěrka")
 
     aktualni_uzaverka = engine.get_datum_uzaverky()
     dnes = date.today()
 
-    # --- STATUS BAR ---
+    # --- STATUS BAR (Zelený/Žlutý pruh) ---
     if aktualni_uzaverka:
         st.warning(f"⛔ Účetnictví je UZAMČENO k datu: **{aktualni_uzaverka.strftime('%d. %m. %Y')}**")
     else:
@@ -877,50 +877,117 @@ def zobrazit_uzaverku():
 
     st.markdown("---")
 
-    # PŘIDÁME TŘETÍ ZÁLOŽKU PRO 710
-    tab_lock, tab_unlock, tab_710 = st.tabs(["🔒 Uzamykání období", "🔓 Odemknout / Opravit", "📉 Roční závěrka (710)"])
-
-    # ... (Zde nechte kód pro tab_lock a tab_unlock tak, jak byl minule) ...
-    # ...
+    # --- 4 HLAVNÍ ZÁLOŽKY ---
+    tabs = st.tabs([
+        "🧮 Daň z příjmů (Kalkulátor)",
+        "🔚 Roční závěrka (702)",
+        "🆕 Otevření roku (701)",
+        "🔒 Uzamykání data"
+    ])
 
     # =========================================================
-    # ZÁLOŽKA 3: PŘEÚČTOVÁNÍ NA 710
+    # TAB 1: KALKULAČKA DANĚ
     # =========================================================
-    with tab_710:
-        st.subheader("Účetní uzavření výsledkových účtů")
-        st.markdown(
-            """
-            Tato operace automaticky:
-            1. Spočítá zůstatky všech účtů **5xx (Náklady)** a **6xx (Výnosy)**.
-            2. Vytvoří **jednu hromadnou transakci**, která tyto účty vynuluje.
-            3. Rozdíl převede na účet **710 (Účet zisků a ztrát)**.
-            """
-        )
-        st.warning("⚠️ Toto provádějte obvykle jen **jednou ročně (k 31. 12.)** před finálním uzamčením roku.")
+    with tabs[0]:
+        st.subheader("Výpočet a zaúčtování daně z příjmů (DPPO)")
 
-        col_710_date, col_710_btn = st.columns([1, 1], vertical_alignment="bottom")
+        col_rok_dan, col_dummy = st.columns([1, 2])
+        vybrany_rok = col_rok_dan.number_input("Daňový rok", value=dnes.year, step=1)
 
-        with col_710_date:
-            # Defaultně 31.12. minulého roku, nebo aktuálního
-            last_year = dnes.year - 1
-            default_uzav = date(last_year, 12, 31)
-            datum_uctovani = st.date_input("Datum účetní závěrky:", value=default_uzav)
+        # 1. Získání hrubého výsledku
+        d_od = date(vybrany_rok, 1, 1)
+        d_do = date(vybrany_rok, 12, 31)
+        data_rep = engine.get_report_data(d_od, d_do)
+        hruby_zisk = data_rep['hospodarsky_vysledek']
 
-        with col_710_btn:
-            # 1. Zde si rezervujeme místo PRO ZPRÁVU (nad tlačítkem)
-            zprava_placeholder = st.empty()
+        if hruby_zisk >= 0:
+            st.info(f"📈 Hrubý účetní ZISK: **{hruby_zisk:,.2f} Kč**")
+        else:
+            st.error(f"📉 Hrubá účetní ZTRÁTA: **{hruby_zisk:,.2f} Kč**")
 
-            # 2. Tlačítko je až pod tím
-            if st.button("🚀 Provést převod na 710", type="primary", use_container_width=True):
-                # Voláme backend
-                vysledek = engine.provest_uctovani_uzaverky_710(datum_uctovani)
+        # 2. Optimalizace (jen vizuální pro demo)
+        with st.expander("⚙️ Daňová optimalizace (Úpravy základu daně)", expanded=False):
+            c1, c2 = st.columns(2)
+            c1.number_input("➕ Nedaňové náklady (např. 513)", min_value=0.0)
+            c2.number_input("➖ Uplatnění ztráty z min. let", min_value=0.0)
 
-                # 3. Výsledek vypíšeme do rezervovaného místa NAHOŘE
-                if "✅" in vysledek:
-                    zprava_placeholder.success(vysledek)
-                    st.balloons()
-                else:
-                    zprava_placeholder.error(vysledek)
+        # 3. Výpočet
+        sazba = 19 if vybrany_rok < 2024 else 21
+        dan = max(0, hruby_zisk) * (sazba / 100.0)
+
+        st.metric("Předběžná daň", f"{dan:,.2f} Kč")
+
+        if st.button("📝 Zaúčtovat daň (MD 591 / D 341)", type="primary"):
+            if dan > 0:
+                res = engine.zauctovat_dan_z_prijmu(d_do, dan)
+                if res: st.success(f"✅ Daň zaúčtována! ID: {res}")
+            else:
+                st.warning("Daň je nulová.")
+
+    # =========================================================
+    # TAB 2: ROČNÍ ZÁVĚRKA (702) - TOTO JE TO HLAVNÍ
+    # =========================================================
+    with tabs[1]:
+        st.subheader("Konečná roční závěrka")
+        st.markdown("""
+        **Tento proces provede:**
+        1.  Uzavření účtů 5xx a 6xx proti účtu **710**.
+        2.  Uzavření rozvahových účtů proti účtu **702**.
+        3.  Převedení zisku/ztráty na **702**.
+        """)
+
+        rok_uzav = st.number_input("Rok k uzavření", value=dnes.year, step=1, key="rok_uzav_key")
+
+        # Placeholder pro zprávy, aby nebyly pod tlačítkem
+        msg_placeholder = st.empty()
+
+        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary"):
+            with st.spinner("Pracuji na uzávěrce..."):
+                vysledek = engine.provest_rocn_uzaverku_komplet(rok_uzav)
+
+            if "✅" in vysledek:
+                msg_placeholder.success(vysledek)
+                st.balloons()
+            else:
+                msg_placeholder.error(vysledek)
+
+    # =========================================================
+    # TAB 3: OTEVŘENÍ ROKU (701)
+    # =========================================================
+    with tabs[2]:
+        st.subheader("Otevření účetních knih (Nový rok)")
+        st.markdown("Vezme konečné stavy ze **702** (minulý rok) a vytvoří počáteční stavy na **701** (nový rok).")
+
+        rok_start = st.number_input("Minulý rok (který překlápíme)", value=dnes.year, step=1, key="rok_start_key")
+
+        msg_ph_open = st.empty()
+
+        if st.button("✨ Otevřít nový rok"):
+            vysledek = engine.otevrit_novy_rok(rok_start)
+            if "✅" in vysledek:
+                msg_ph_open.success(vysledek)
+            else:
+                msg_ph_open.error(vysledek)
+
+    # =========================================================
+    # TAB 4: UZAMYKÁNÍ
+    # =========================================================
+    with tabs[3]:
+        st.subheader("Uzamčení období")
+        st.caption("Uzamčením zabráníte vkládání a editaci transakcí před vybraným datem.")
+
+        col_lock, col_btn = st.columns([2, 1], vertical_alignment="bottom")
+        datum_lock = col_lock.date_input("Uzamknout k datu:", value=dnes)
+
+        if col_btn.button("🔒 Zamknout"):
+            if engine.set_datum_uzaverky(datum_lock):
+                st.success(f"Uzamčeno k {datum_lock}")
+                st.rerun()
+
+        st.divider()
+        if st.button("🔓 Odemknout CELÝ systém (Admin)", type="secondary"):
+            engine.set_datum_uzaverky(None)
+            st.rerun()
 
 
 # --- Hlavní spouštěcí smyčka Streamlit ---
