@@ -869,7 +869,7 @@ def zobrazit_uzaverku():
     aktualni_uzaverka = engine.get_datum_uzaverky()
     dnes = date.today()
 
-    # --- STATUS BAR (Zelený/Žlutý pruh) ---
+    # --- STATUS BAR ---
     if aktualni_uzaverka:
         st.warning(f"⛔ Účetnictví je UZAMČENO k datu: **{aktualni_uzaverka.strftime('%d. %m. %Y')}**")
     else:
@@ -877,71 +877,129 @@ def zobrazit_uzaverku():
 
     st.markdown("---")
 
-    # --- 4 HLAVNÍ ZÁLOŽKY ---
+    # 4 ZÁLOŽKY
     tabs = st.tabs([
-        "🧮 Daň z příjmů (Kalkulátor)",
+        "🧮 Daň z příjmů (Kalkulace)",
         "🔚 Roční závěrka (702)",
         "🆕 Otevření roku (701)",
         "🔒 Uzamykání data"
     ])
 
     # =========================================================
-    # TAB 1: KALKULAČKA DANĚ
+    # TAB 1: KALKULACE DANĚ (Designová úprava - Kompaktní banner)
     # =========================================================
     with tabs[0]:
-        st.subheader("Výpočet a zaúčtování daně z příjmů (DPPO)")
+        st.subheader("Výpočet daně z příjmů právnických osob (DPPO)")
 
-        col_rok_dan, col_dummy = st.columns([1, 2])
-        vybrany_rok = col_rok_dan.number_input("Daňový rok", value=dnes.year, step=1)
+        # 1. Výběr roku
+        col_rok, _ = st.columns([1, 3])
+        vybrany_rok = col_rok.number_input("Zvolte rok", value=dnes.year, step=1)
 
-        # 1. Získání hrubého výsledku
+        # 2. Načtení dat
         d_od = date(vybrany_rok, 1, 1)
         d_do = date(vybrany_rok, 12, 31)
-        data_rep = engine.get_report_data(d_od, d_do)
-        hruby_zisk = data_rep['hospodarsky_vysledek']
+        report_data = engine.get_report_data(d_od, d_do)
+        hruby_zisk = report_data.get('hospodarsky_vysledek', 0.0)
 
+        # --- VELKÝ BOX PRO HRUBÝ ZISK ---
         if hruby_zisk >= 0:
-            st.info(f"📈 Hrubý účetní ZISK: **{hruby_zisk:,.2f} Kč**")
+            barva_text = "#28a745"  # Zelená
+            barva_pozadi = "rgba(40, 167, 69, 0.15)"
+            popisek = "Hrubý účetní ZISK"
+            ikona = "📈"
         else:
-            st.error(f"📉 Hrubá účetní ZTRÁTA: **{hruby_zisk:,.2f} Kč**")
+            barva_text = "#dc3545"  # Červená
+            barva_pozadi = "rgba(220, 53, 69, 0.15)"
+            popisek = "Hrubá účetní ZTRÁTA"
+            ikona = "📉"
 
-        # 2. Optimalizace (jen vizuální pro demo)
-        with st.expander("⚙️ Daňová optimalizace (Úpravy základu daně)", expanded=False):
-            c1, c2 = st.columns(2)
-            c1.number_input("➕ Nedaňové náklady (např. 513)", min_value=0.0)
-            c2.number_input("➖ Uplatnění ztráty z min. let", min_value=0.0)
+        st.markdown(f"""
+            <div style="
+                background-color: {barva_pozadi}; 
+                padding: 15px; 
+                border-radius: 10px; 
+                border: 2px solid {barva_text}; 
+                text-align: center; 
+                margin-bottom: 25px;">
+                <h4 style="margin:0; color: {barva_text}; opacity: 0.9;">{ikona} {popisek}</h4>
+                <h1 style="margin:0; color: {barva_text}; font-size: 3em; font-weight: bold;">
+                    {hruby_zisk:,.2f} Kč
+                </h1>
+            </div>
+        """, unsafe_allow_html=True)
 
-        # 3. Výpočet
-        sazba = 19 if vybrany_rok < 2024 else 21
-        dan = max(0, hruby_zisk) * (sazba / 100.0)
+        st.markdown("### Stanovení daňové povinnosti")
 
-        st.metric("Předběžná daň", f"{dan:,.2f} Kč")
+        # 3. Formulář (Grid s mezerou pro zarovnání)
+        c1, c_space, c2 = st.columns([2, 1, 1])
 
-        if st.button("📝 Zaúčtovat daň (MD 591 / D 341)", type="primary"):
-            if dan > 0:
-                res = engine.zauctovat_dan_z_prijmu(d_do, dan)
-                if res: st.success(f"✅ Daň zaúčtována! ID: {res}")
+        # A) Základ daně
+        default_zaklad = max(0.0, hruby_zisk)
+        with c1:
+            zaklad_dane = st.number_input("Základ daně (Kč)", value=default_zaklad, step=1000.0)
+
+        # B) Sazba (vpravo)
+        with c2:
+            sazba_dane = st.number_input("Sazba daně (%)", value=21.0, step=1.0, format="%.1f")
+
+        # 4. Výpočet
+        vypoctena_dan = zaklad_dane * (sazba_dane / 100.0)
+
+        # 5. VÝSLEDEK (KOMPAKTNĚJŠÍ VERZE)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        if vypoctena_dan > 0:
+            res_color = "#dc3545"
+            res_bg = "rgba(220, 53, 69, 0.1)"
+            res_text = "SPLATNÉ (K ÚHRADĚ)"
+        else:
+            res_color = "#28a745"
+            res_bg = "rgba(40, 167, 69, 0.1)"
+            res_text = "BEZ POVINNOSTI"
+
+        # Změny v CSS: menší padding, menší margin u h1, menší font-size u h1
+        st.markdown(f"""
+            <div style="
+                text-align: center; 
+                background-color: {res_bg};
+                padding: 10px 15px; 
+                border-radius: 8px; 
+                border: 1px solid {res_color};
+                margin-bottom: 20px;">
+                <h5 style="margin:0; color: #888; font-weight: normal;">Daňová povinnost k úhradě</h5>
+                <h1 style="margin: 5px 0; color: {res_color}; font-size: 2.4em;">{vypoctena_dan:,.2f} Kč</h1>
+                <div style="color: {res_color}; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9em;">
+                    {res_text}
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        # 6. Tlačítko
+        if st.button("📝 Zaúčtovat daň (591 / 341)", type="primary", use_container_width=True):
+            if vypoctena_dan > 0:
+                res_id = engine.zauctovat_dan_z_prijmu(d_do, vypoctena_dan)
+                if res_id:
+                    st.success(f"✅ Daň {vypoctena_dan:,.2f} Kč byla zaúčtována! (Doklad DPPO-{vybrany_rok})")
+                    st.balloons()
             else:
-                st.warning("Daň je nulová.")
+                st.warning("Daň je nulová nebo záporná, transakce nebyla vytvořena.")
 
     # =========================================================
-    # TAB 2: ROČNÍ ZÁVĚRKA (702) - TOTO JE TO HLAVNÍ
+    # TAB 2: ROČNÍ ZÁVĚRKA (702)
     # =========================================================
     with tabs[1]:
         st.subheader("Konečná roční závěrka")
         st.markdown("""
         **Tento proces provede:**
-        1.  Uzavření účtů 5xx a 6xx proti účtu **710**.
+        1.  Uzavření nákladů a výnosů proti účtu **710**.
         2.  Uzavření rozvahových účtů proti účtu **702**.
         3.  Převedení zisku/ztráty na **702**.
         """)
 
         rok_uzav = st.number_input("Rok k uzavření", value=dnes.year, step=1, key="rok_uzav_key")
-
-        # Placeholder pro zprávy, aby nebyly pod tlačítkem
         msg_placeholder = st.empty()
 
-        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary"):
+        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary", use_container_width=True):
             with st.spinner("Pracuji na uzávěrce..."):
                 vysledek = engine.provest_rocn_uzaverku_komplet(rok_uzav)
 
@@ -959,10 +1017,9 @@ def zobrazit_uzaverku():
         st.markdown("Vezme konečné stavy ze **702** (minulý rok) a vytvoří počáteční stavy na **701** (nový rok).")
 
         rok_start = st.number_input("Minulý rok (který překlápíme)", value=dnes.year, step=1, key="rok_start_key")
-
         msg_ph_open = st.empty()
 
-        if st.button("✨ Otevřít nový rok"):
+        if st.button("✨ Otevřít nový rok", use_container_width=True):
             vysledek = engine.otevrit_novy_rok(rok_start)
             if "✅" in vysledek:
                 msg_ph_open.success(vysledek)
@@ -979,7 +1036,7 @@ def zobrazit_uzaverku():
         col_lock, col_btn = st.columns([2, 1], vertical_alignment="bottom")
         datum_lock = col_lock.date_input("Uzamknout k datu:", value=dnes)
 
-        if col_btn.button("🔒 Zamknout"):
+        if col_btn.button("🔒 Zamknout", use_container_width=True):
             if engine.set_datum_uzaverky(datum_lock):
                 st.success(f"Uzamčeno k {datum_lock}")
                 st.rerun()
