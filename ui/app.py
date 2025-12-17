@@ -696,14 +696,12 @@ def zobrazit_historii_uctu():
     # --- 1. SEKCE FILTRŮ ---
     st.subheader("🔍 Vyhledat transakce")
 
-    # Volba metody vyhledávání
     metoda = st.radio(
         "Podle čeho chcete hledat?",
         ["📅 Podle data transakce", "📄 Podle čísla dokladu (Faktury)", "👤 Podle Klienta (ID)"],
         horizontal=True
     )
 
-    # Základní SQL dotaz (vybíráme 5 sloupců)
     sql_base = """
         SELECT T.id, T.datum, T.doklad_cislo, T.popis, SUM(P.castka) as Objem
         FROM Transakce T
@@ -714,26 +712,18 @@ def zobrazit_historii_uctu():
 
     # --- LOGIKA FILTRŮ ---
     if metoda == "📅 Podle data transakce":
-        # Použijeme existující časový filtr
         date_from, date_to = time_filter_ui()
-
-        # OPRAVA 1: Kontrola, zda máme data, než zavoláme strftime
         if not date_from or not date_to:
             st.info("Zvolte prosím časové období.")
             return
-
-        # SQL podmínka
         sql_base += " AND T.klient_id = ? AND T.datum >= ? AND T.datum <= ?"
         params = [KLIENT_ID, date_from.strftime('%Y-%m-%d'), date_to.strftime('%Y-%m-%d')]
 
     elif metoda == "📄 Podle čísla dokladu (Faktury)":
         col_search, _ = st.columns([2, 1])
         hledany_text = col_search.text_input("Zadejte číslo dokladu (nebo jeho část):", placeholder="např. FP-2025")
-
-        # SQL podmínka
         sql_base += " AND T.klient_id = ? AND T.doklad_cislo LIKE ?"
         params = [KLIENT_ID, f"%{hledany_text}%"]
-
         if not hledany_text:
             st.info("Zadejte alespoň jeden znak pro vyhledání.")
             return
@@ -743,12 +733,10 @@ def zobrazit_historii_uctu():
         sql_base += " AND T.klient_id = ?"
         params = [KLIENT_ID]
 
-    # --- DOKONČENÍ SQL (Grupování a řazení) ---
     sql_base += " GROUP BY T.id, T.datum, T.doklad_cislo, T.popis ORDER BY T.datum DESC, T.id DESC"
 
     # --- 2. VYKONÁNÍ DOTAZU ---
     from core.database import execute_query
-
     try:
         rows = execute_query(sql_base, tuple(params))
     except Exception as e:
@@ -759,29 +747,23 @@ def zobrazit_historii_uctu():
         st.warning("⚠️ Žádné transakce nebyly nalezeny.")
         return
 
-    # OPRAVA 2: Převedeme pyodbc Row objekty na standardní tuple
-    # Tím zajistíme, že Pandas pochopí, že jde o 5 sloupců, ne o 1 objekt
     rows_clean = [tuple(r) for r in rows]
 
-    # --- 3. VÝPIS NALEZENÝCH DAT (TABULKA) ---
+    # --- 3. VÝPIS DAT ---
     st.success(f"Nalezeno {len(rows_clean)} záznamů.")
 
-    # Nyní už shape (tvar) bude sedět (N, 5)
     df = pd.DataFrame(rows_clean, columns=["ID", "Datum", "Doklad", "Popis", "Objem (pohyby)"])
-
-    # Formátování
     if not df.empty:
         df['Datum'] = pd.to_datetime(df['Datum']).dt.date
         df['Objem (pohyby)'] = df['Objem (pohyby)'].apply(lambda x: f"{x:,.2f} Kč")
 
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
     st.markdown("---")
 
     # --- 4. SEKCE EDITACE ---
     st.subheader("✏️ Upravit vybranou transakci")
 
-    # Selectbox se seznamem
     moznosti = [f"{r[2]} | {r[1]} | {r[3]} (ID: {r[0]})" for r in rows_clean]
     vybrana_str = st.selectbox("Vyberte ze seznamu výše:", moznosti)
 
@@ -791,7 +773,6 @@ def zobrazit_historii_uctu():
         if match:
             transakce_id = int(match.group(1))
 
-            # --- FORMULÁŘ ---
             detail = engine.get_transakce_detail(transakce_id)
 
             if detail:
@@ -822,12 +803,23 @@ def zobrazit_historii_uctu():
                         sel_d = st.selectbox("Účet D", ucty_d, key=f"e_d_u_{transakce_id}")
                         ucet_dal_fin = sel_d.split(" - ")[0] if sel_d else ""
 
+                    # Odhad částky
                     odhad = 0.0
                     if detail['pohyby']:
                         odhad = max([p['castka'] for p in detail['pohyby']])
 
                     c_money, c_dph = st.columns(2)
-                    new_castka = c_money.number_input("Částka základu (bez DPH)", value=float(odhad), min_value=0.0)
+
+                    # === ZMĚNA ZDE: TEXT INPUT MÍSTO NUMBER INPUT ===
+                    # 1. Převedeme odhad na string, aby se zobrazil
+                    odhad_str = f"{odhad:.2f}" if odhad else ""
+
+                    # 2. Textový input umožní psát "10m", "5k" atd.
+                    new_castka_raw = c_money.text_input(
+                        "Částka základu (bez DPH)",
+                        value=odhad_str,
+                        help="Můžete zadávat zkratky: 10m = 10 milionů, 5k = 5 tisíc."
+                    )
 
                     dph_sazby = engine.get_dph_sazby()
                     dph_opts = sorted(list(dph_sazby.keys()), reverse=True)
@@ -839,22 +831,28 @@ def zobrazit_historii_uctu():
                     save_btn = st.form_submit_button("💾 Uložit opravu", type="primary")
 
                     if save_btn:
-                        try:
-                            engine.upravit_transakci(
-                                transakce_id=transakce_id,
-                                nove_datum=new_datum,
-                                novy_popis=new_popis,
-                                novy_doklad=new_doklad,
-                                ucet_md=ucet_md_fin,
-                                ucet_dal=ucet_dal_fin,
-                                castka=new_castka,
-                                sazba_dph=new_sazba,
-                                smer_dph_popis=new_smer_dph
-                            )
-                            st.success("✅ Změna uložena!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Chyba: {e}")
+                        # 3. PŘEVOD TEXTU NA ČÍSLO
+                        final_castka = parse_input_money(new_castka_raw)
+
+                        if final_castka <= 0:
+                            st.error("Částka musí být větší než 0.")
+                        else:
+                            try:
+                                engine.upravit_transakci(
+                                    transakce_id=transakce_id,
+                                    nove_datum=new_datum,
+                                    novy_popis=new_popis,
+                                    novy_doklad=new_doklad,
+                                    ucet_md=ucet_md_fin,
+                                    ucet_dal=ucet_dal_fin,
+                                    castka=final_castka,  # Posíláme už převedené číslo
+                                    sazba_dph=new_sazba,
+                                    smer_dph_popis=new_smer_dph
+                                )
+                                st.success(f"✅ Změna uložena! (Nová částka: {final_castka:,.2f} Kč)")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Chyba: {e}")
 
 
 def zobrazit_uzaverku():
@@ -906,18 +904,18 @@ def zobrazit_uzaverku():
         c1, c2, c3 = st.columns(3)
 
         with c1:
-            if st.button(f"Uzavřít rok {this_year - 1}", use_container_width=True):
+            if st.button(f"Uzavřít rok {this_year - 1}", width="stretch"):
                 engine.set_datum_uzaverky(last_year_end)
                 st.rerun()
 
         with c2:
             lbl_kvartal = f"Uzavřít Q{curr_quarter - 1}" if curr_quarter > 1 else "Uzavřít Q4 min. roku"
-            if st.button(lbl_kvartal, use_container_width=True):
+            if st.button(lbl_kvartal, width="stretch"):
                 engine.set_datum_uzaverky(last_q_end)
                 st.rerun()
 
         with c3:
-            if st.button("Uzavřít minulý měsíc", use_container_width=True):
+            if st.button("Uzavřít minulý měsíc", width="stretch"):
                 engine.set_datum_uzaverky(last_month_end)
                 st.rerun()
 
@@ -934,7 +932,7 @@ def zobrazit_uzaverku():
 
         with col_man2:
             # Tlačítko teď bude zarovnané se spodkem date_inputu
-            if st.button("🔒 Potvrdit uzamčení", type="primary", use_container_width=True):
+            if st.button("🔒 Potvrdit uzamčení", type="primary", width="stretch"):
                 engine.set_datum_uzaverky(new_lock_date)
                 st.success(f"Uzávěrka k {new_lock_date.strftime('%d.%m.%Y')} provedena.")
                 st.rerun()
@@ -969,7 +967,7 @@ def zobrazit_uzaverku():
 
                     # Oranžový hover efekt
                     st.markdown('<div class="orange-hover-container">', unsafe_allow_html=True)
-                    if st.button("🔓 Posunout hranici", use_container_width=True):
+                    if st.button("🔓 Posunout hranici", width="stretch"):
                         engine.set_datum_uzaverky(novy_datum_zpet)
                         st.success(f"Uzávěrka posunuta zpět na {novy_datum_zpet.strftime('%d.%m.%Y')}.")
                         st.rerun()
@@ -984,7 +982,7 @@ def zobrazit_uzaverku():
                     # 72px je obvyklá výška inputu + labelu ve Streamlitu.
                     st.markdown("<div style='height: 100px;'></div>", unsafe_allow_html=True)
 
-                    if st.button("🔓 Odemknout CELÝ systém", type="primary", use_container_width=True):
+                    if st.button("🔓 Odemknout CELÝ systém", type="primary", width="stretch"):
                         engine.set_datum_uzaverky(None)
                         st.success("Účetnictví kompletně odemčeno.")
                         st.rerun()
