@@ -537,59 +537,34 @@ def zobrazit_reporty():
 
 
 def zobrazit_prehled_uctu():
-    st.header("Hlavní Přehled Účtů")
+    st.header("📊 Detailní přehled účtů a analytika")
 
-    # --- 1. ČASOVÝ FILTR ---
-    date_from, date_to = time_filter_ui()
+    # 1. Filtry (přizpůsobte vašim existujícím funkcím)
+    col1, col2 = st.columns(2)
+    d_od = col1.date_input("Od:", value=date(date.today().year, 1, 1))
+    d_do = col2.date_input("Do:", value=date.today())
 
-    # --- 2. NAČTENÍ DAT ---
-    zustatky_data = engine.spocti_zustatky(datum_od=date_from, datum_do=date_to)
+    # 2. Volba zobrazení
+    rezim = st.segmented_control(
+        "Úroveň zobrazení:",
+        options=["Agregovaně (Syntetika)", "Detailně (Analytika)"],
+        default="Agregovaně (Syntetika)"
+    )
+    is_detail = (rezim == "Detailně (Analytika)")
 
-    if not zustatky_data:
-        st.info("V zadaném období nebyly nalezeny žádné pohyby.")
-        return
+    # 3. Načtení dat (Teď už funkce 'detailni' zná)
+    data = engine.get_report_data(d_od, d_do, detailni=is_detail)
 
-    # --- 3. PŘÍPRAVA DAT PRO TABULKU ---
-    data_pro_tabulku = []
+    if data:
+        # Příklad zobrazení nákladů
+        if data['naklady']:
+            st.subheader("Náklady (5xx)")
+            df_n = pd.DataFrame(data['naklady'])
+            df_n.columns = ['Účet', 'Název', 'Částka']
+            st.dataframe(df_n, width="stretch", hide_index=True)
 
-    # Seznam účtů, které chceme vidět VŽDY (VIP)
-    vip_ucty = ['211', '221', '311', '321']
-
-    for ucet, castka in zustatky_data.items():
-        # Podmínka: Zobrazit, pokud je zůstatek nenulový NEBO je to VIP účet
-        if abs(castka) > 0.005 or ucet in vip_ucty:
-            nazev = engine.get_ucet_nazev(ucet)
-            data_pro_tabulku.append({
-                "Účet": ucet,
-                "Název": nazev,
-                "Zůstatek Raw": castka,
-                "Zůstatek": castka
-            })
-
-    # --- 4. VYTVOŘENÍ DATAFRAME ---
-    if data_pro_tabulku:
-        df = pd.DataFrame(data_pro_tabulku)
-
-        # Seřazení podle čísla účtu
-        df = df.sort_values(by='Účet')
-
-        # Formátování měny
-        df['Zůstatek'] = df['Zůstatek'].apply(
-            lambda x: f"{x:,.2f} Kč".replace(",", " ").replace(".", ",")
-        )
-
-        # --- NOVÝ NADPIS ---
-        st.subheader("Detailní přehled účtů")
-
-        # --- VYKRESLENÍ TABULKY ---
-        # Odstraněn parametr 'height', aby se tabulka přizpůsobila obsahu
-        st.dataframe(
-            df[['Účet', 'Název', 'Zůstatek']],
-            hide_index=True,
-            width="stretch"
-        )
-    else:
-        st.warning("Žádné účty nemají v tomto období nenulový zůstatek.")
+        # Zobrazení HV
+        st.metric("Průběžný výsledek hospodaření", f"{data['hospodarsky_vysledek']:,.2f} Kč")
 
 
 def zobrazit_prehled_dph():
@@ -967,7 +942,7 @@ def zobrazit_uzaverku():
         """, unsafe_allow_html=True)
 
         # 6. Tlačítko
-        if st.button("📝 Zaúčtovat daň (591 / 341)", type="primary", use_container_width=True):
+        if st.button("📝 Zaúčtovat daň (591 / 341)", type="primary", width="stretch"):
             if vypoctena_dan > 0:
                 res_id = engine.zauctovat_dan_z_prijmu(d_do, vypoctena_dan)
                 if res_id:
@@ -983,7 +958,7 @@ def zobrazit_uzaverku():
         # ... (zbytek kódu z minula) ...
         rok_uzav = st.number_input("Rok k uzavření", value=dnes.year, step=1, key="rok_uzav_key")
         msg_placeholder = st.empty()
-        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary", use_container_width=True):
+        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary", width="stretch"):
             with st.spinner("Pracuji..."):
                 res = engine.provest_rocn_uzaverku_komplet(rok_uzav)
             if "✅" in res:
@@ -995,7 +970,7 @@ def zobrazit_uzaverku():
         st.subheader("Otevření nového roku (701)")
         rok_start = st.number_input("Minulý rok", value=dnes.year, step=1, key="rok_start_key")
         msg_open = st.empty()
-        if st.button("✨ Otevřít nový rok", use_container_width=True):
+        if st.button("✨ Otevřít nový rok", width="stretch"):
             res = engine.otevrit_novy_rok(rok_start)
             if "✅" in res:
                 msg_open.success(res)
@@ -1006,7 +981,7 @@ def zobrazit_uzaverku():
         st.subheader("Uzamčení data")
         col_lock, col_btn = st.columns([2, 1], vertical_alignment="bottom")
         d_lock = col_lock.date_input("Uzamknout k:", value=dnes)
-        if col_btn.button("🔒 Zamknout", use_container_width=True):
+        if col_btn.button("🔒 Zamknout", width="stretch"):
             engine.set_datum_uzaverky(d_lock)
             st.success("Uzamčeno.")
             st.rerun()

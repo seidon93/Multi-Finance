@@ -839,67 +839,86 @@ class AccountingEngine:
             print(f"CHYBA DPH: {e}")
             return {'CELKEM': Decimal('0.0')}
 
-    def get_report_data(self, d_od, d_do):
-        # OPRAVA JOIN: P.ucet = R.cislo
+    def get_report_data(self, datum_od=None, datum_do=None, detailni=True):
+        """
+        Vrací data pro reporty.
+        Pokud detailni=False, automaticky sčítá analytické podúčty (např. 501.001 -> 501).
+        """
         sql = """
             SELECT P.ucet, R.nazev, R.typ_uctu, SUM(P.castka), P.smer
             FROM UcetniPohyby P 
             LEFT JOIN UctovyRozvrh R ON P.ucet = R.cislo
             JOIN Transakce T ON P.transakce_id = T.id
-            WHERE T.klient_id = ? AND T.datum >= ? AND T.datum <= ?
-            GROUP BY P.ucet, R.nazev, R.typ_uctu, P.smer
+            WHERE T.klient_id = ?
         """
-        # ... zbytek funkce pro zpracování dat je stejný jako dříve ...
-        # (Vrací slovník s 'naklady', 'vynosy', 'aktiva', 'pasiva', 'hospodarsky_vysledek')
-        # Pokud potřebujete tělo funkce, dejte vědět, ale logika pythonu se nemění, jen SQL.
+        params = [self.klient_id]
+        if datum_od:
+            sql += " AND T.datum >= ?";
+            params.append(datum_od)
+        if datum_do:
+            sql += " AND T.datum <= ?";
+            params.append(datum_do)
+
+        sql += " GROUP BY P.ucet, R.nazev, R.typ_uctu, P.smer"
+
         try:
-            rows = execute_query(sql, (self.klient_id, d_od, d_do))
-            rep = {'aktiva': [], 'pasiva': [], 'naklady': [], 'vynosy': [], 'suma_aktiva': 0, 'suma_pasiva': 0,
-                   'suma_naklady': 0, 'suma_vynosy': 0}
+            rows = execute_query(sql, tuple(params))
+            rep = {
+                'aktiva': [], 'pasiva': [], 'naklady': [], 'vynosy': [],
+                'suma_aktiva': 0.0, 'suma_pasiva': 0.0, 'suma_naklady': 0.0, 'suma_vynosy': 0.0
+            }
+
+            # Pomocná struktura pro agregaci
             temp = defaultdict(lambda: {'bal': 0.0, 'typ': 'S', 'nazev': ''})
 
             for r in rows:
-                u = r[0];
-                val = float(r[3]);
+                u_raw = str(r[0])
+                # LOGIKA ANALYTIKY: Pokud nechceme detail, usekneme účet u první tečky
+                u = u_raw if detailni else u_raw.split('.')[0]
+
+                val = float(r[3])
                 smer = r[4]
+
+                # Uložíme typ a název (pokud agregujeme, název se bere ze syntetického účtu)
                 temp[u]['typ'] = r[2] if r[2] else 'S'
-                temp[u]['nazev'] = r[1] if r[1] else u
+                if not detailni and '.' in u_raw:
+                    temp[u]['nazev'] = self.get_ucet_nazev(u)
+                else:
+                    temp[u]['nazev'] = r[1] if r[1] else u_raw
+
+                # Výpočet bilance
                 if smer == 'MD':
                     temp[u]['bal'] += val
                 else:
                     temp[u]['bal'] -= val
 
+            # Rozdělení do výsledného reportu
             for u, data in temp.items():
                 b = data['bal'];
                 t = data['typ'];
                 n = data['nazev']
-                if abs(b) < 0.01: continue
-                item = {'ucet': u, 'nazev': n}
+                if abs(b) < 0.005: continue
+
+                item = {'ucet': u, 'nazev': n, 'castka': abs(b)}
+
                 if t == 'A':
-                    item['castka'] = b;
                     rep['aktiva'].append(item);
                     rep['suma_aktiva'] += b
                 elif t in ['P', 'P*', 'Z']:
-                    item['castka'] = abs(b);
                     rep['pasiva'].append(item);
                     rep['suma_pasiva'] += abs(b)
                 elif t == 'N':
-                    item['castka'] = b;
                     rep['naklady'].append(item);
-                    rep['suma_naklady'] += b
+                    rep['suma_naklady'] += abs(b)
                 elif t == 'V':
-                    item['castka'] = abs(b);
                     rep['vynosy'].append(item);
                     rep['suma_vynosy'] += abs(b)
 
-            hv = rep['suma_vynosy'] - rep['suma_naklady']
-            rep['hospodarsky_vysledek'] = hv
-            if abs(hv) > 0.005:
-                rep['pasiva'].append({'ucet': 'HV', 'nazev': 'Výsledek hospodaření', 'castka': hv})
-                rep['suma_pasiva'] += hv
+            rep['hospodarsky_vysledek'] = rep['suma_vynosy'] - rep['suma_naklady']
             return rep
-        except:
-            return {}
+        except Exception as e:
+            print(f"Chyba v get_report_data: {e}")
+            return None
 
 
     # --- PŘEPRACOVANÁ METODA PRO UKLÁDÁNÍ TRANSAKCE (Nyní s DPH) ---
