@@ -82,6 +82,20 @@ st.markdown(
         border-radius: 5px; 
         text-align: center;
     }
+    .orange-hover-container button {
+        border-color: #ff9800 !important; 
+        color: #ff9800 !important; 
+    }
+    .orange-hover-container button:hover {
+        border-color: #ff9800 !important; /* Sytě oranžová */
+        color: #ff9800 !important;
+        background-color: rgba(255, 152, 0, 0.1) !important; /* Jemné pozadí */
+    }
+    .orange-hover-container button:active {
+        border-color: #e65100 !important;
+        color: #e65100 !important;
+    }
+    
     </style>
     """,
     unsafe_allow_html=True
@@ -118,7 +132,7 @@ def zobrazit_header():
 
     vyber = st.sidebar.radio(
         "Zvolte Modul:",
-        ("Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty")
+        ("Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty","Uzávěrka")
     )
     return vyber
 
@@ -213,7 +227,7 @@ def formular_nova_transakce():
 
     # --- ULOŽENÍ ---
     st.markdown("")
-    if st.button("Uložit Transakci", type="primary", use_container_width=True):
+    if st.button("Uložit Transakci", type="primary", width="stretch"):
         if castka_bez_dph <= 0:
             st.error("Zadejte částku.")
         elif not ucet_md_zaklad or not ucet_dal_zaklad:
@@ -289,39 +303,39 @@ def time_filter_ui():
         # Řádek 1: Základní rychlá volba
         c1, c2, c3, c4 = st.columns(4)
 
-        if c1.button("Dnes", use_container_width=True):
+        if c1.button("Dnes", width="stretch"):
             set_dates(dnes, dnes)
 
-        if c2.button("Tento týden", use_container_width=True):
+        if c2.button("Tento týden", width="stretch"):
             start_week = get_start_of_week(dnes)
             end_week = start_week + timedelta(days=6)
             set_dates(start_week, end_week)
 
-        if c3.button("Tento měsíc", use_container_width=True):
+        if c3.button("Tento měsíc", width="stretch"):
             start_month = get_start_of_month(dnes)
             end_month = get_end_of_month(dnes)
             set_dates(start_month, end_month)
 
-        if c4.button("Tento rok", use_container_width=True):
+        if c4.button("Tento rok", width="stretch"):
             set_dates(get_start_of_year(dnes), get_end_of_year(dnes))
 
         # --- NOVÉ: Řádek 2: Čtvrtletí ---
         q1, q2, q3, q4 = st.columns(4)
 
         # 1. Čtvrtletí (leden - březen)
-        if q1.button("1. Čtvrtletí (Q1)", use_container_width=True):
+        if q1.button("1. Čtvrtletí (Q1)", width="stretch"):
             set_dates(date(aktualni_rok, 1, 1), date(aktualni_rok, 3, 31))
 
         # 2. Čtvrtletí (duben - červen)
-        if q2.button("2. Čtvrtletí (Q2)", use_container_width=True):
+        if q2.button("2. Čtvrtletí (Q2)", width="stretch"):
             set_dates(date(aktualni_rok, 4, 1), date(aktualni_rok, 6, 30))
 
         # 3. Čtvrtletí (červenec - září)
-        if q3.button("3. Čtvrtletí (Q3)", use_container_width=True):
+        if q3.button("3. Čtvrtletí (Q3)", width="stretch"):
             set_dates(date(aktualni_rok, 7, 1), date(aktualni_rok, 9, 30))
 
         # 4. Čtvrtletí (říjen - prosinec)
-        if q4.button("4. Čtvrtletí (Q4)", use_container_width=True):
+        if q4.button("4. Čtvrtletí (Q4)", width="stretch"):
             set_dates(date(aktualni_rok, 10, 1), date(aktualni_rok, 12, 31))
 
 
@@ -340,7 +354,7 @@ def time_filter_ui():
             key='picker_to'
         )
 
-        if col_reset.button("Reset filtrů", type="primary", use_container_width=True):
+        if col_reset.button("Reset filtrů", type="primary", width="stretch"):
             set_dates(None, None)
 
         # Logika aktualizace při ruční změně
@@ -385,7 +399,7 @@ def zobrazit_reporty():
             f"""
             <div style="background-color: {bg_hv}; padding: 15px; border-radius: 8px; border-left: 5px solid {barva_hv}; text-align: center; margin-bottom: 30px;">
                 <h4 style="margin:0; color: #888;">VÝSLEDEK HOSPODAŘENÍ ({label_hv})</h4>
-                <h1 style="margin:0; color: {barva_hv}; font-size: 2.2em;">{hv:,.2f} Kč</h1>
+                <h1 style="margin:0; color: {barva_hv}; font-size: 2.2em;"> 💵 {hv:,.2f} Kč</h1>
             </div>
             """,
             unsafe_allow_html=True
@@ -403,7 +417,7 @@ def zobrazit_reporty():
             df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
             df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
             df = df[['Účet', 'Název', 'Částka']]
-            st.dataframe(df, hide_index=True, use_container_width=True)
+            st.dataframe(df, hide_index=True, width="stretch")
         else:
             st.info("Žádné náklady.")
 
@@ -421,7 +435,7 @@ def zobrazit_reporty():
             df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
             df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
             df = df[['Účet', 'Název', 'Částka']]
-            st.dataframe(df, hide_index=True, use_container_width=True)
+            st.dataframe(df, hide_index=True, width="stretch")
         else:
             st.info("Žádné výnosy.")
 
@@ -438,7 +452,7 @@ def zobrazit_reporty():
             barva_ban = "#28a745"
             bg_ban = "rgba(40, 167, 69, 0.1)"
             nadpis_ban = "STAV BILANCE"
-            text_ban = "BILANCE JE VYROVNANÁ (OK)"
+            text_ban = "✅ BILANCE JE VYROVNANÁ"
         else:
             # Červený styl (Chyba)
             barva_ban = "#dc3545"
@@ -475,7 +489,7 @@ def zobrazit_reporty():
             st.dataframe(
                 df_final,
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
                 column_config={
                     "Účet": st.column_config.TextColumn("Účet", width="small"),
                     "Název": st.column_config.TextColumn("Název", width="medium"),
@@ -510,7 +524,7 @@ def zobrazit_reporty():
                 st.dataframe(
                     df_final,
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     column_config={
                         "Účet": st.column_config.TextColumn("Účet", width="small"),
                         "Název": st.column_config.TextColumn("Název", width="medium"),
@@ -572,7 +586,7 @@ def zobrazit_prehled_uctu():
         st.dataframe(
             df[['Účet', 'Název', 'Zůstatek']],
             hide_index=True,
-            use_container_width=True
+            width="stretch"
         )
     else:
         st.warning("Žádné účty nemají v tomto období nenulový zůstatek.")
@@ -638,7 +652,7 @@ def zobrazit_prehled_dph():
             st.dataframe(
                 df_detail,
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
                 column_config={
                     "Účty": st.column_config.TextColumn("Použité účty", help="Účty použité pro výpočet")
                 }
@@ -757,6 +771,138 @@ def zobrazit_historii_uctu():
             st.info(f"Na účtu {ucet_k_zobrazeni} nebyly nalezeny žádné pohyby v období od {date_from} do {date_to}.")
 
 
+def zobrazit_uzaverku():
+    st.header("🔒 Správa účetních období - uzávěrka")
+
+    aktualni_uzaverka = engine.get_datum_uzaverky()
+    dnes = date.today()
+
+    # --- STATUS BAR (STAV) ---
+    if aktualni_uzaverka:
+        st.warning(
+            f"⛔ Účetnictví je UZAMČENO k datu: **{aktualni_uzaverka.strftime('%d. %m. %Y')}**\n\n"
+            "Transakce s datem starším nebo rovným tomuto datu nelze přidávat, měnit ani mazat."
+        )
+    else:
+        st.success("✅ Účetnictví je OTEVŘENÉ - lze editovat jakékoliv datum.")
+
+
+    # Rozdělení na akce
+    tab_lock, tab_unlock = st.tabs(["🔒 Uzavřít období", "🔓 Odemknout / Opravit"])
+
+    # =========================================================
+    # ZÁLOŽKA 1: UZAVŘÍT (Lock) - ZAROVNANÉ
+    # =========================================================
+    with tab_lock:
+        st.subheader("Uzamknout období")
+        st.caption("Tímto aktem zamezíte změnám v historii. Doporučuje se dělat po DPH a roční závěrce.")
+
+        # --- Výpočty dat ---
+        this_year = dnes.year
+        last_month_end = date(dnes.year, dnes.month, 1) - timedelta(days=1)
+        last_year_end = date(this_year - 1, 12, 31)
+
+        curr_quarter = (dnes.month - 1) // 3 + 1
+        if curr_quarter == 1:
+            last_q_end = date(this_year - 1, 12, 31)
+        else:
+            m = (curr_quarter - 1) * 3
+            if m == 3:
+                last_q_end = date(this_year, 3, 31)
+            elif m == 6:
+                last_q_end = date(this_year, 6, 30)
+            elif m == 9:
+                last_q_end = date(this_year, 9, 30)
+            else:
+                last_q_end = last_month_end
+
+        # --- TLAČÍTKA RYCHLÉ VOLBY ---
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            if st.button(f"Uzavřít rok {this_year - 1}", use_container_width=True):
+                engine.set_datum_uzaverky(last_year_end)
+                st.rerun()
+
+        with c2:
+            lbl_kvartal = f"Uzavřít Q{curr_quarter - 1}" if curr_quarter > 1 else "Uzavřít Q4 min. roku"
+            if st.button(lbl_kvartal, use_container_width=True):
+                engine.set_datum_uzaverky(last_q_end)
+                st.rerun()
+
+        with c3:
+            if st.button("Uzavřít minulý měsíc", use_container_width=True):
+                engine.set_datum_uzaverky(last_month_end)
+                st.rerun()
+
+        st.markdown("---")
+
+        # --- MANUÁLNÍ UZAMČENÍ (ZDE JE ZMĚNA) ---
+        st.write("**Manuální výběr data:**")
+
+        # Použijeme vertical_alignment="bottom", aby tlačítko kleslo na úroveň inputu
+        col_man1, col_man2 = st.columns([2, 1], vertical_alignment="bottom")
+
+        with col_man1:
+            new_lock_date = st.date_input("Uzamknout vše DO data (včetně):", value=dnes, key="lock_date_picker")
+
+        with col_man2:
+            # Tlačítko teď bude zarovnané se spodkem date_inputu
+            if st.button("🔒 Potvrdit uzamčení", type="primary", use_container_width=True):
+                engine.set_datum_uzaverky(new_lock_date)
+                st.success(f"Uzávěrka k {new_lock_date.strftime('%d.%m.%Y')} provedena.")
+                st.rerun()
+        # =========================================================
+        # ZÁLOŽKA 2: ODEMKNOUT (Unlock) - ZAROVNANÉ
+        # =========================================================
+        with tab_unlock:
+            st.subheader("Odemknout období pro opravy")
+
+            if not aktualni_uzaverka:
+                st.info("Systém je již plně odemčený. Není co odemykat.")
+            else:
+                st.write("Můžete buď posunout datum uzávěrky do minulosti (částečné odemčení), nebo ji zrušit úplně.")
+
+                # 1. ZMĚNA: Odstraněno vertical_alignment="bottom", aby nadpisy seděly nahoře
+                c_un1, c_un2 = st.columns(2)
+
+                # --- LEVÝ SLOUPEC (POSUNOUT) ---
+                with c_un1:
+                    st.markdown("#### 📅 Posunout datum zpět")
+                    st.caption("Např. chci opravit něco v prosinci, tak posunu uzávěrku na listopad.")
+
+                    default_unlock = aktualni_uzaverka - timedelta(days=30)
+
+                    # Tento prvek (Input) zabírá místo...
+                    novy_datum_zpet = st.date_input(
+                        "Nové datum uzávěrky:",
+                        value=default_unlock,
+                        max_value=aktualni_uzaverka,
+                        key="unlock_picker"
+                    )
+
+                    # Oranžový hover efekt
+                    st.markdown('<div class="orange-hover-container">', unsafe_allow_html=True)
+                    if st.button("🔓 Posunout hranici", use_container_width=True):
+                        engine.set_datum_uzaverky(novy_datum_zpet)
+                        st.success(f"Uzávěrka posunuta zpět na {novy_datum_zpet.strftime('%d.%m.%Y')}.")
+                        st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                # --- PRAVÝ SLOUPEC (ÚPLNÉ ODEMČENÍ) ---
+                with c_un2:
+                    st.markdown("#### ⚠️ Úplné odemčení")
+                    st.caption("Zruší veškerá omezení. Bude možné editovat celou historii.")
+
+                    # 2. ZMĚNA: Přidání "neviditelné vycpávky", která simuluje výšku Date Inputu vlevo.
+                    # 72px je obvyklá výška inputu + labelu ve Streamlitu.
+                    st.markdown("<div style='height: 100px;'></div>", unsafe_allow_html=True)
+
+                    if st.button("🔓 Odemknout CELÝ systém", type="primary", use_container_width=True):
+                        engine.set_datum_uzaverky(None)
+                        st.success("Účetnictví kompletně odemčeno.")
+                        st.rerun()
+
 # --- Hlavní spouštěcí smyčka Streamlit ---
 if __name__ == "__main__":
     modul = zobrazit_header()
@@ -771,3 +917,5 @@ if __name__ == "__main__":
         zobrazit_historii_uctu()
     elif modul == "Reporty":
         zobrazit_reporty()
+    elif modul == "Uzávěrka":
+        zobrazit_uzaverku()

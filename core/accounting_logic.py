@@ -10,7 +10,28 @@ class AccountingEngine:
 
     def __init__(self, klient_id):
         self.klient_id = klient_id
+        self.zkontroluj_a_oprav_db()
 
+    def zkontroluj_a_oprav_db(self):
+        """
+        Pomocná metoda: Zkontroluje, zda existuje sloupec 'datum_uzaverky'.
+        Pokud ne, automaticky ho přidá.
+        """
+        check_sql = "SELECT col_length('Klienti', 'datum_uzaverky')"
+        try:
+            res = execute_query(check_sql)
+            # Pokud col_length vrátí None, sloupec neexistuje
+            if not res or res[0][0] is None:
+                print("⚠️ Sloupec 'datum_uzaverky' chybí. Přidávám ho...")
+                alter_sql = "ALTER TABLE Klienti ADD datum_uzaverky DATE NULL;"
+
+                with Database() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(alter_sql)
+                    conn.commit()
+                print("✅ Databáze úspěšně aktualizována.")
+        except Exception as e:
+            print(f"Chyba při kontrole/opravě DB: {e}")
     def get_ucty_podle_tridy(self, trida_prefix):
         """
         Vrátí seznam účtů, které začínají daným číslem (např. '2' pro třídu 2).
@@ -638,6 +659,7 @@ class AccountingEngine:
             print(f"CHYBA DPH: {e}")
             return {'CELKEM': Decimal('0.0')}
 
+
     def get_report_data(self, datum_od=None, datum_do=None):
         """
         Vrátí data pro Rozvahu a Výsledovku na základě skutečného typu účtu v DB (A, P, N, V).
@@ -758,10 +780,12 @@ class AccountingEngine:
             print(f"Chyba při generování reportu: {e}")
             return report
 
+
     # --- PŘEPRACOVANÁ METODA PRO UKLÁDÁNÍ TRANSAKCE (Nyní s DPH) ---
     def save_transakce(self, datum, popis, doklad_cislo, ucet_md_zaklad, ucet_dal_zaklad, castka_bez_dph, sazba_dph,
                        smer_dph_popis):
 
+        self.zkontroluj_zda_je_otevreno(datum)
         # 0. PŘÍPRAVA DAT DPH
         castka_zaklad = float(castka_bez_dph)
         castka_dph = 0.0
@@ -853,3 +877,57 @@ class AccountingEngine:
                 conn._conn.rollback()
             print(f"Chyba při ukládání transakce do DB: {e}")
             return None
+
+    # ==========================================
+    # NOVÉ METODY PRO UZÁVĚRKU (VLOŽIT DO TŘÍDY)
+    # ==========================================
+
+    def get_datum_uzaverky(self):
+        """Vrátí datum poslední uzávěrky (nebo None)."""
+        # POZOR: Ujistěte se, že máte v DB sloupec datum_uzaverky (viz Krok 2 níže)
+        sql = "SELECT datum_uzaverky FROM Klienti WHERE id = ?"
+        try:
+            res = execute_query(sql, (self.klient_id,))
+            if res and res[0][0]:
+                return res[0][0]  # Vrací date objekt nebo string
+            return None
+        except Exception:
+            # Pokud sloupec neexistuje, vrátíme None (aby aplikace nespadla, dokud neupravíte DB)
+            return None
+
+    def set_datum_uzaverky(self, nove_datum):
+        """Nastaví datum, do kterého je účetnictví uzamčeno."""
+        sql = "UPDATE Klienti SET datum_uzaverky = ? WHERE id = ?"
+        try:
+            with Database() as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, (nove_datum, self.klient_id))
+                conn.commit()
+            return True
+        except Exception as e:
+            print(f"Chyba při uzávěrce: {e}")
+            return False
+
+    def zkontroluj_zda_je_otevreno(self, datum_transakce):
+        """
+        Vyhodí chybu, pokud je datum_transakce v uzavřeném období.
+        """
+        uzavreno_do = self.get_datum_uzaverky()
+
+        if not uzavreno_do:
+            return  # Žádná uzávěrka = vše povoleno
+
+        # Pokud je datum_transakce string, převedeme na date objekt
+        if isinstance(datum_transakce, str):
+            from datetime import datetime
+            try:
+                datum_transakce = datetime.strptime(datum_transakce, '%Y-%m-%d').date()
+            except:
+                pass  # Pokud konverze selže, necháme to být (pravděpodobně je to už date)
+
+        # Porovnání
+        if datum_transakce <= uzavreno_do:
+            datum_str = datum_transakce.strftime('%d.%m.%Y') if hasattr(datum_transakce, 'strftime') else str(
+                datum_transakce)
+            uzaverka_str = uzavreno_do.strftime('%d.%m.%Y')
+            raise ValueError(f"⛔ Období je uzamčeno! (Uzávěrka do {uzaverka_str}). Nelze účtovat k {datum_str}.")
