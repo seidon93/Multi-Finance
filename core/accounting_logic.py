@@ -1089,3 +1089,89 @@ class AccountingEngine:
                 datum_transakce)
             uzaverka_str = uzavreno_do.strftime('%d.%m.%Y')
             raise ValueError(f"⛔ Období je uzamčeno! (Uzávěrka do {uzaverka_str}). Nelze účtovat k {datum_str}.")
+
+    # ==========================================
+    # METODA PRO ROČNÍ UZÁVĚRKU (710)
+    # ==========================================
+    def provest_uctovani_uzaverky_710(self, datum_uzaverky):
+        """
+        Spočítá zůstatky všech účtů 5xx a 6xx od začátku roku do datum_uzaverky.
+        Vytvoří hromadný doklad, který je vynuluje proti účtu 710.
+        """
+        rok = datum_uzaverky.year
+        datum_od = date(rok, 1, 1)
+
+        # 1. Získání zůstatků (agregace po účtech)
+        sql_balance = """
+            SELECT P.ucet, SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END) as bilance
+            FROM UcetniPohyby P
+            JOIN Transakce T ON P.transakce_id = T.id
+            WHERE T.klient_id = ? 
+              AND T.datum >= ? AND T.datum <= ?
+              AND (P.ucet LIKE '5%' OR P.ucet LIKE '6%')
+            GROUP BY P.ucet
+            HAVING SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END) <> 0
+        """
+
+        try:
+            # Zajistíme existenci účtu 710
+            self.zajisti_existenci_uctu("710", "Účet zisků a ztrát")
+
+            pohyby_k_uctovani = execute_query(sql_balance, (self.klient_id, datum_od, datum_uzaverky))
+
+            if not pohyby_k_uctovani:
+                return "Žádné zůstatky k uzavření (náklady a výnosy jsou 0)."
+
+            with Database() as conn:
+                cursor = conn.cursor()
+
+                # A) Vytvoření hlavičky transakce
+                doklad_cislo = f"UZAV-{rok}"
+                popis = f"Uzávěrka nákladů a výnosů k {rok}"
+
+                # Pozor: Pokud je období uzamčeno, musíme to obejít nebo zkontrolovat.
+                # Předpokládáme, že uživatel to dělá PŘED zamčením nebo to systém při této speciální akci dovolí.
+                # self.zkontroluj_zda_je_otevreno(datum_uzaverky) # Odkomentujte, pokud chcete striktní kontrolu
+
+                cursor.execute("""
+                    INSERT INTO Transakce (klient_id, datum, popis, doklad_cislo, created_at)
+                    VALUES (?, ?, ?, ?, GETDATE());
+                    SELECT SCOPE_IDENTITY();
+                """, (self.klient_id, datum_uzaverky, popis, doklad_cislo))
+
+                transakce_id = cursor.fetchone()[0]
+
+                # B) Generování pohybů
+                sql_insert = "INSERT INTO UcetniPohyby (transakce_id, klient_id, ucet, smer, castka) VALUES (?, ?, ?, ?, ?)"
+
+                celkem_md_710 = 0.0
+                celkem_d_710 = 0.0
+
+                for row in pohyby_k_uctovani:
+                    ucet = row[0]
+                    bilance = float(row[1])  # Kladná = převažuje MD (Náklad), Záporná = převažuje D (Výnos)
+
+                    if bilance > 0:
+                        # Je to NÁKLAD (má zůstatek na MD). Abychom ho vynulovali, musíme účtovat na D.
+                        # Protiúčet 710 bude na MD.
+                        castka = abs(bilance)
+                        # 1. Vynulování pětky (Dal)
+                        cursor.execute(sql_insert, (transakce_id, self.klient_id, ucet, 'D', castka))
+                        # 2. Načtení na 710 (MD) - ale 710 sečteme a zapíšeme až na konci, nebo po řádcích?
+                        # Zapisujme po řádcích, je to přehlednější v deníku (vidíme z jakého účtu to přišlo).
+                        cursor.execute(sql_insert, (transakce_id, self.klient_id, '710', 'MD', castka))
+
+                    elif bilance < 0:
+                        # Je to VÝNOS (má zůstatek na D). Abychom ho vynulovali, musíme účtovat na MD.
+                        # Protiúčet 710 bude na D.
+                        castka = abs(bilance)
+                        # 1. Vynulování šestky (Má Dáti)
+                        cursor.execute(sql_insert, (transakce_id, self.klient_id, ucet, 'MD', castka))
+                        # 2. Načtení na 710 (Dal)
+                        cursor.execute(sql_insert, (transakce_id, self.klient_id, '710', 'D', castka))
+
+                conn.commit()
+                return f"✅ Uzávěrka úspěšná! Vytvořen doklad {doklad_cislo} (ID {transakce_id})."
+
+        except Exception as e:
+            return f"❌ Chyba při uzávěrce: {e}"

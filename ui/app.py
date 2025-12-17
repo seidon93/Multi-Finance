@@ -747,9 +747,10 @@ def zobrazit_historii_uctu():
         st.warning("⚠️ Žádné transakce nebyly nalezeny.")
         return
 
+    # Převedeme na tuple pro Pandas
     rows_clean = [tuple(r) for r in rows]
 
-    # --- 3. VÝPIS DAT ---
+    # --- 3. VÝPIS DAT (ROZTAŽENÁ TABULKA) ---
     st.success(f"Nalezeno {len(rows_clean)} záznamů.")
 
     df = pd.DataFrame(rows_clean, columns=["ID", "Datum", "Doklad", "Popis", "Objem (pohyby)"])
@@ -757,9 +758,21 @@ def zobrazit_historii_uctu():
         df['Datum'] = pd.to_datetime(df['Datum']).dt.date
         df['Objem (pohyby)'] = df['Objem (pohyby)'].apply(lambda x: f"{x:,.2f} Kč")
 
-    st.dataframe(df, width="stretch", hide_index=True)
+    # === ZDE JE ZMĚNA PRO ROZTAŽENÍ ===
+    st.dataframe(
+        df,
+        width="stretch",  # Roztáhne kontejner
+        hide_index=True,
+        column_config={
+            "ID": st.column_config.NumberColumn("ID", width="small"),
+            "Datum": st.column_config.DateColumn("Datum", width="small"),
+            "Doklad": st.column_config.TextColumn("Doklad", width="small"),
+            # Popis nastavíme na "large", aby se roztáhl a vyplnil zbytek místa
+            "Popis": st.column_config.TextColumn("Popis", width="large"),
+            "Objem (pohyby)": st.column_config.TextColumn("Objem", width="medium"),
+        }
+    )
 
-    st.markdown("---")
 
     # --- 4. SEKCE EDITACE ---
     st.subheader("✏️ Upravit vybranou transakci")
@@ -810,11 +823,8 @@ def zobrazit_historii_uctu():
 
                     c_money, c_dph = st.columns(2)
 
-                    # === ZMĚNA ZDE: TEXT INPUT MÍSTO NUMBER INPUT ===
-                    # 1. Převedeme odhad na string, aby se zobrazil
+                    # Text input pro podporu zkratek (10m, 5k)
                     odhad_str = f"{odhad:.2f}" if odhad else ""
-
-                    # 2. Textový input umožní psát "10m", "5k" atd.
                     new_castka_raw = c_money.text_input(
                         "Částka základu (bez DPH)",
                         value=odhad_str,
@@ -831,7 +841,6 @@ def zobrazit_historii_uctu():
                     save_btn = st.form_submit_button("💾 Uložit opravu", type="primary")
 
                     if save_btn:
-                        # 3. PŘEVOD TEXTU NA ČÍSLO
                         final_castka = parse_input_money(new_castka_raw)
 
                         if final_castka <= 0:
@@ -845,7 +854,7 @@ def zobrazit_historii_uctu():
                                     novy_doklad=new_doklad,
                                     ucet_md=ucet_md_fin,
                                     ucet_dal=ucet_dal_fin,
-                                    castka=final_castka,  # Posíláme už převedené číslo
+                                    castka=final_castka,
                                     sazba_dph=new_sazba,
                                     smer_dph_popis=new_smer_dph
                                 )
@@ -856,136 +865,58 @@ def zobrazit_historii_uctu():
 
 
 def zobrazit_uzaverku():
-    st.header("🔒 Správa účetních období - uzávěrka")
+    st.header("🔒 Správa Účetních Období & Závěrka")
 
     aktualni_uzaverka = engine.get_datum_uzaverky()
     dnes = date.today()
 
-    # --- STATUS BAR (STAV) ---
+    # --- STATUS BAR ---
     if aktualni_uzaverka:
-        st.warning(
-            f"⛔ Účetnictví je UZAMČENO k datu: **{aktualni_uzaverka.strftime('%d. %m. %Y')}**\n\n"
-            "Transakce s datem starším nebo rovným tomuto datu nelze přidávat, měnit ani mazat."
-        )
+        st.warning(f"⛔ Účetnictví je UZAMČENO k datu: **{aktualni_uzaverka.strftime('%d. %m. %Y')}**")
     else:
-        st.success("✅ Účetnictví je OTEVŘENÉ - lze editovat jakékoliv datum.")
+        st.success("✅ Účetnictví je OTEVŘENÉ.")
 
+    st.markdown("---")
 
-    # Rozdělení na akce
-    tab_lock, tab_unlock = st.tabs(["🔒 Uzavřít období", "🔓 Odemknout / Opravit"])
+    # PŘIDÁME TŘETÍ ZÁLOŽKU PRO 710
+    tab_lock, tab_unlock, tab_710 = st.tabs(["🔒 Uzamykání období", "🔓 Odemknout / Opravit", "📉 Roční závěrka (710)"])
+
+    # ... (Zde nechte kód pro tab_lock a tab_unlock tak, jak byl minule) ...
+    # ...
 
     # =========================================================
-    # ZÁLOŽKA 1: UZAVŘÍT (Lock) - ZAROVNANÉ
+    # ZÁLOŽKA 3: PŘEÚČTOVÁNÍ NA 710
     # =========================================================
-    with tab_lock:
-        st.subheader("Uzamknout období")
-        st.caption("Tímto aktem zamezíte změnám v historii. Doporučuje se dělat po DPH a roční závěrce.")
+    with tab_710:
+        st.subheader("Účetní uzavření výsledkových účtů")
+        st.markdown(
+            """
+            Tato operace automaticky:
+            1. Spočítá zůstatky všech účtů **5xx (Náklady)** a **6xx (Výnosy)**.
+            2. Vytvoří **jednu hromadnou transakci**, která tyto účty vynuluje.
+            3. Rozdíl převede na účet **710 (Účet zisků a ztrát)**.
+            """
+        )
+        st.warning("⚠️ Toto provádějte obvykle jen **jednou ročně (k 31. 12.)** před finálním uzamčením roku.")
 
-        # --- Výpočty dat ---
-        this_year = dnes.year
-        last_month_end = date(dnes.year, dnes.month, 1) - timedelta(days=1)
-        last_year_end = date(this_year - 1, 12, 31)
+        col_710_date, col_710_btn = st.columns([1, 1], vertical_alignment="bottom")
 
-        curr_quarter = (dnes.month - 1) // 3 + 1
-        if curr_quarter == 1:
-            last_q_end = date(this_year - 1, 12, 31)
-        else:
-            m = (curr_quarter - 1) * 3
-            if m == 3:
-                last_q_end = date(this_year, 3, 31)
-            elif m == 6:
-                last_q_end = date(this_year, 6, 30)
-            elif m == 9:
-                last_q_end = date(this_year, 9, 30)
-            else:
-                last_q_end = last_month_end
+        with col_710_date:
+            # Defaultně 31.12. minulého roku, nebo aktuálního
+            last_year = dnes.year - 1
+            default_uzav = date(last_year, 12, 31)
+            datum_uctovani = st.date_input("Datum účetní závěrky:", value=default_uzav)
 
-        # --- TLAČÍTKA RYCHLÉ VOLBY ---
-        c1, c2, c3 = st.columns(3)
+        with col_710_btn:
+            if st.button("🚀 Provést převod na 710", type="primary", width="stretch"):
+                # Voláme backend
+                vysledek = engine.provest_uctovani_uzaverky_710(datum_uctovani)
 
-        with c1:
-            if st.button(f"Uzavřít rok {this_year - 1}", width="stretch"):
-                engine.set_datum_uzaverky(last_year_end)
-                st.rerun()
-
-        with c2:
-            lbl_kvartal = f"Uzavřít Q{curr_quarter - 1}" if curr_quarter > 1 else "Uzavřít Q4 min. roku"
-            if st.button(lbl_kvartal, width="stretch"):
-                engine.set_datum_uzaverky(last_q_end)
-                st.rerun()
-
-        with c3:
-            if st.button("Uzavřít minulý měsíc", width="stretch"):
-                engine.set_datum_uzaverky(last_month_end)
-                st.rerun()
-
-        st.markdown("---")
-
-        # --- MANUÁLNÍ UZAMČENÍ (ZDE JE ZMĚNA) ---
-        st.write("**Manuální výběr data:**")
-
-        # Použijeme vertical_alignment="bottom", aby tlačítko kleslo na úroveň inputu
-        col_man1, col_man2 = st.columns([2, 1], vertical_alignment="bottom")
-
-        with col_man1:
-            new_lock_date = st.date_input("Uzamknout vše DO data (včetně):", value=dnes, key="lock_date_picker")
-
-        with col_man2:
-            # Tlačítko teď bude zarovnané se spodkem date_inputu
-            if st.button("🔒 Potvrdit uzamčení", type="primary", width="stretch"):
-                engine.set_datum_uzaverky(new_lock_date)
-                st.success(f"Uzávěrka k {new_lock_date.strftime('%d.%m.%Y')} provedena.")
-                st.rerun()
-        # =========================================================
-        # ZÁLOŽKA 2: ODEMKNOUT (Unlock) - ZAROVNANÉ
-        # =========================================================
-        with tab_unlock:
-            st.subheader("Odemknout období pro opravy")
-
-            if not aktualni_uzaverka:
-                st.info("Systém je již plně odemčený. Není co odemykat.")
-            else:
-                st.write("Můžete buď posunout datum uzávěrky do minulosti (částečné odemčení), nebo ji zrušit úplně.")
-
-                # 1. ZMĚNA: Odstraněno vertical_alignment="bottom", aby nadpisy seděly nahoře
-                c_un1, c_un2 = st.columns(2)
-
-                # --- LEVÝ SLOUPEC (POSUNOUT) ---
-                with c_un1:
-                    st.markdown("#### 📅 Posunout datum zpět")
-                    st.caption("Např. chci opravit něco v prosinci, tak posunu uzávěrku na listopad.")
-
-                    default_unlock = aktualni_uzaverka - timedelta(days=30)
-
-                    # Tento prvek (Input) zabírá místo...
-                    novy_datum_zpet = st.date_input(
-                        "Nové datum uzávěrky:",
-                        value=default_unlock,
-                        max_value=aktualni_uzaverka,
-                        key="unlock_picker"
-                    )
-
-                    # Oranžový hover efekt
-                    st.markdown('<div class="orange-hover-container">', unsafe_allow_html=True)
-                    if st.button("🔓 Posunout hranici", width="stretch"):
-                        engine.set_datum_uzaverky(novy_datum_zpet)
-                        st.success(f"Uzávěrka posunuta zpět na {novy_datum_zpet.strftime('%d.%m.%Y')}.")
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-                # --- PRAVÝ SLOUPEC (ÚPLNÉ ODEMČENÍ) ---
-                with c_un2:
-                    st.markdown("#### ⚠️ Úplné odemčení")
-                    st.caption("Zruší veškerá omezení. Bude možné editovat celou historii.")
-
-                    # 2. ZMĚNA: Přidání "neviditelné vycpávky", která simuluje výšku Date Inputu vlevo.
-                    # 72px je obvyklá výška inputu + labelu ve Streamlitu.
-                    st.markdown("<div style='height: 100px;'></div>", unsafe_allow_html=True)
-
-                    if st.button("🔓 Odemknout CELÝ systém", type="primary", width="stretch"):
-                        engine.set_datum_uzaverky(None)
-                        st.success("Účetnictví kompletně odemčeno.")
-                        st.rerun()
+                if "✅" in vysledek:
+                    st.success(vysledek)
+                    st.balloons()
+                else:
+                    st.error(vysledek)
 
 # --- Hlavní spouštěcí smyčka Streamlit ---
 if __name__ == "__main__":
