@@ -840,10 +840,7 @@ class AccountingEngine:
             return {'CELKEM': Decimal('0.0')}
 
     def get_report_data(self, datum_od=None, datum_do=None, detailni=True):
-        """
-        Vrací data pro reporty.
-        Pokud detailni=False, automaticky sčítá analytické podúčty (např. 501.001 -> 501).
-        """
+        """Vrací data pro reporty s podporou agregace analytiky."""
         sql = """
             SELECT P.ucet, R.nazev, R.typ_uctu, SUM(P.castka), P.smer
             FROM UcetniPohyby P 
@@ -868,51 +865,43 @@ class AccountingEngine:
                 'suma_aktiva': 0.0, 'suma_pasiva': 0.0, 'suma_naklady': 0.0, 'suma_vynosy': 0.0
             }
 
-            # Pomocná struktura pro agregaci
             temp = defaultdict(lambda: {'bal': 0.0, 'typ': 'S', 'nazev': ''})
 
             for r in rows:
                 u_raw = str(r[0])
-                # LOGIKA ANALYTIKY: Pokud nechceme detail, usekneme účet u první tečky
+                # Pokud není detailní, sečteme pod hlavní účet (např. 501.001 -> 501)
                 u = u_raw if detailni else u_raw.split('.')[0]
 
                 val = float(r[3])
                 smer = r[4]
 
-                # Uložíme typ a název (pokud agregujeme, název se bere ze syntetického účtu)
                 temp[u]['typ'] = r[2] if r[2] else 'S'
+                # Pro agregovaný název zkusíme najít název syntetiky, jinak necháme původní
                 if not detailni and '.' in u_raw:
                     temp[u]['nazev'] = self.get_ucet_nazev(u)
                 else:
                     temp[u]['nazev'] = r[1] if r[1] else u_raw
 
-                # Výpočet bilance
                 if smer == 'MD':
                     temp[u]['bal'] += val
                 else:
                     temp[u]['bal'] -= val
 
-            # Rozdělení do výsledného reportu
             for u, data in temp.items():
                 b = data['bal'];
                 t = data['typ'];
                 n = data['nazev']
                 if abs(b) < 0.005: continue
-
                 item = {'ucet': u, 'nazev': n, 'castka': abs(b)}
 
                 if t == 'A':
-                    rep['aktiva'].append(item);
-                    rep['suma_aktiva'] += b
+                    rep['aktiva'].append(item); rep['suma_aktiva'] += b
                 elif t in ['P', 'P*', 'Z']:
-                    rep['pasiva'].append(item);
-                    rep['suma_pasiva'] += abs(b)
+                    rep['pasiva'].append(item); rep['suma_pasiva'] += abs(b)
                 elif t == 'N':
-                    rep['naklady'].append(item);
-                    rep['suma_naklady'] += abs(b)
+                    rep['naklady'].append(item); rep['suma_naklady'] += abs(b)
                 elif t == 'V':
-                    rep['vynosy'].append(item);
-                    rep['suma_vynosy'] += abs(b)
+                    rep['vynosy'].append(item); rep['suma_vynosy'] += abs(b)
 
             rep['hospodarsky_vysledek'] = rep['suma_vynosy'] - rep['suma_naklady']
             return rep

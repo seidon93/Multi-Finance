@@ -3,7 +3,8 @@ import os
 from datetime import date, timedelta
 import streamlit as st
 import pandas as pd
-from decimal import Decimal  # Zajistit, že Decimal je k dispozici pro DPH
+from decimal import Decimal
+import time
 
 # Zajištění, že se importují moduly z nadřazeného adresáře (core)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -101,6 +102,18 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+import time
+
+def uloz_transakci_ui():
+    # ... načtení hodnot z formuláře ...
+    doklad = st.text_input("Číslo dokladu")
+
+    if st.button("Uložit"):
+        # Kontrola unikátnosti dokladu
+        check = execute_query("SELECT 1 FROM Transakce WHERE doklad_cislo = ?", (doklad,))
+        if check:
+            doklad = f"{doklad}-{int(time.time())}"  # Přidá timestamp pro unikátnost
+            st.warning(f"Doklad s tímto číslem již existoval. Uloženo jako: {doklad}")
 
 # --- POMOCNÁ FUNKCE PRO PŘEVOD MĚNY (VLOŽIT NA ZAČÁTEK SOUBORU) ---
 def parse_input_money(text_value):
@@ -537,34 +550,39 @@ def zobrazit_reporty():
 
 
 def zobrazit_prehled_uctu():
-    st.header("📊 Detailní přehled účtů a analytika")
+    st.header("Hlavní Přehled Účtů")
 
-    # 1. Filtry (přizpůsobte vašim existujícím funkcím)
-    col1, col2 = st.columns(2)
-    d_od = col1.date_input("Od:", value=date(date.today().year, 1, 1))
-    d_do = col2.date_input("Do:", value=date.today())
+    # --- OPRAVA FILTRŮ ---
+    # Pokud vaše funkce zobrazit_filtr_casu() hází chybu, použijeme toto standardní řešení:
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        d_od = st.date_input("Datum OD", value=date(date.today().year, 1, 1), key="prehled_od")
+    with col_d2:
+        d_do = st.date_input("Datum DO", value=date.today(), key="prehled_do")
 
-    # 2. Volba zobrazení
-    rezim = st.segmented_control(
-        "Úroveň zobrazení:",
-        options=["Agregovaně (Syntetika)", "Detailně (Analytika)"],
-        default="Agregovaně (Syntetika)"
-    )
-    is_detail = (rezim == "Detailně (Analytika)")
+    # --- PŘEPÍNAČ ANALYTIKY ---
+    # Přidáme malý toggle přepínač pod datumy
+    st.markdown("### Nastavení")
+    is_detail = st.toggle("Zobrazit detailní analytiku", value=False,
+                          help="Vypnuto: Seskupí účty jako 501.001 pod hlavní účet 501.")
 
-    # 3. Načtení dat (Teď už funkce 'detailni' zná)
+    st.markdown("---")
+
+    # Načtení dat (nyní předáváme parametr detailni)
     data = engine.get_report_data(d_od, d_do, detailni=is_detail)
 
     if data:
-        # Příklad zobrazení nákladů
-        if data['naklady']:
-            st.subheader("Náklady (5xx)")
-            df_n = pd.DataFrame(data['naklady'])
-            df_n.columns = ['Účet', 'Název', 'Částka']
-            st.dataframe(df_n, width="stretch", hide_index=True)
+        # Původní zobrazení tabulky
+        vsechny = data['aktiva'] + data['pasiva'] + data['naklady'] + data['vynosy']
 
-        # Zobrazení HV
-        st.metric("Průběžný výsledek hospodaření", f"{data['hospodarsky_vysledek']:,.2f} Kč")
+        if vsechny:
+            df = pd.DataFrame(vsechny)
+            df.columns = ['Účet', 'Název', 'Zůstatek']
+            # Formátování měny pro hezčí vzhled
+            df['Zůstatek'] = df['Zůstatek'].apply(lambda x: f"{x:,.2f} Kč")
+            st.dataframe(df, width="stretch", hide_index=True)
+        else:
+            st.info("Pro vybrané období nebyly nalezeny žádné pohyby.")
 
 
 def zobrazit_prehled_dph():
