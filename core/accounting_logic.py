@@ -63,24 +63,29 @@ class AccountingEngine:
 
     def opravit_strukturu_rozvrhu(self):
         """
-        Odstraní check constrainty na sloupci typ_uctu, aby šlo vložit 'Z' nebo 'P*'.
+        Zajistí odstranění constraintů (blokace znaků) a update účtu 799 na P*.
         """
         try:
             with Database() as conn:
                 cursor = conn.cursor()
+
+                # 1. Odstranění omezení (aby šlo uložit P* nebo Z)
                 sql_find = """
-                    SELECT name 
-                    FROM sys.check_constraints 
+                    SELECT name FROM sys.check_constraints 
                     WHERE parent_object_id = OBJECT_ID('UctovyRozvrh') 
                     AND parent_column_id = (SELECT column_id FROM sys.columns WHERE object_id = OBJECT_ID('UctovyRozvrh') AND name = 'typ_uctu')
                 """
                 cursor.execute(sql_find)
                 rows = cursor.fetchall()
                 for row in rows:
-                    c_name = row[0]
-                    # Odstraníme omezení, které brání vložení P* nebo Z
-                    cursor.execute(f"ALTER TABLE UctovyRozvrh DROP CONSTRAINT [{c_name}]")
-                    conn.commit()
+                    cursor.execute(f"ALTER TABLE UctovyRozvrh DROP CONSTRAINT [{row[0]}]")
+
+                # 2. Rozšíření sloupce
+                cursor.execute("ALTER TABLE UctovyRozvrh ALTER COLUMN typ_uctu NVARCHAR(20)")
+
+                # 3. Update 799 na P* (pokud existuje) - OPRAVA: používáme 'cislo'
+                cursor.execute("UPDATE UctovyRozvrh SET typ_uctu = 'P*' WHERE cislo = '799'")
+                conn.commit()
         except Exception:
             pass
 
@@ -566,6 +571,8 @@ class AccountingEngine:
         elif prvni_znak == '6': typ = 'V'
         elif prvni_znak == '7': typ = 'Z', 'P*'
         else: typ = 'S'
+
+        if ucet == '799': t = 'P*'
 
         try:
             with Database() as conn:
@@ -1140,3 +1147,128 @@ class AccountingEngine:
 
         except Exception as e:
             return f"❌ Chyba při uzávěrce: {e}"
+
+    def zauctovat_dan_z_prijmu(self, datum, vypocena_dan, poznamka="Daň z příjmů PO"):
+        self.zajisti_existenci_uctu("591", "Daň z příjmů - splatná")
+        self.zajisti_existenci_uctu("341", "Daň z příjmů")
+        return self.save_transakce(datum, poznamka, f"DPPO-{datum.year}", "591", "341", vypocena_dan, 0, 'Neučtovat')
+
+    # Wrapper pro staré volání (pro kompatibilitu)
+    def provest_uctovani_uzaverky_710(self, datum_uzaverky):
+        return self.provest_rocn_uzaverku_komplet(datum_uzaverky.year)
+
+    def provest_rocn_uzaverku_komplet(self, rok):
+        du = date(rok, 12, 31);
+        dod = date(rok, 1, 1)
+
+        check = execute_query("SELECT id FROM Transakce WHERE doklad_cislo=? AND klient_id=?",
+                              (f"UZAV-{rok}", self.klient_id))
+        if check: return "Uzávěrka již existuje."
+
+        # Pohyby 5,6 -> 710 (filtr na 'cislo' není třeba, P.ucet je string)
+        sql710 = "SELECT P.ucet, SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END) FROM UcetniPohyby P JOIN Transakce T ON T.id=P.transakce_id WHERE P.klient_id=? AND T.datum>=? AND T.datum<=? AND (P.ucet LIKE '5%' OR P.ucet LIKE '6%') GROUP BY P.ucet HAVING SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END) <> 0"
+        rows710 = execute_query(sql710, (self.klient_id, dod, du))
+
+        # Pohyby Rozvaha -> 702
+        sql702 = "SELECT P.ucet, SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END) FROM UcetniPohyby P JOIN Transakce T ON T.id=P.transakce_id WHERE P.klient_id=? AND T.datum<=? AND P.ucet LIKE '[0-49]%' GROUP BY P.ucet HAVING abs(SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END)) > 0.005"
+        rows702 = execute_query(sql702, (self.klient_id, du))
+
+        if not rows710 and not rows702: return "Žádná data."
+
+        self.zajisti_existenci_uctu("710", "Účet zisků a ztrát")
+        self.zajisti_existenci_uctu("702", "Konečný účet rozvažný")
+
+        try:
+            with Database() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO Transakce (klient_id, datum, popis, doklad_cislo, created_at) VALUES (?,?,?,?, GETDATE())",
+                    (self.klient_id, du, f"Uzávěrka {rok}", f"UZAV-{rok}"))
+                cur.execute("SELECT SCOPE_IDENTITY()")
+                tid = cur.fetchone()[0]
+                ins = "INSERT INTO UcetniPohyby (transakce_id, klient_id, ucet, smer, castka) VALUES (?,?,?,?,?)"
+
+                hv = 0.0
+                for r in rows710:
+                    u = r[0];
+                    bal = float(r[1])
+                    if bal > 0:  # N -> D
+                        cur.execute(ins, (tid, self.klient_id, u, 'D', abs(bal)))
+                        cur.execute(ins, (tid, self.klient_id, '710', 'MD', abs(bal)))
+                        hv -= abs(bal)
+                    else:  # V -> MD
+                        cur.execute(ins, (tid, self.klient_id, u, 'MD', abs(bal)))
+                        cur.execute(ins, (tid, self.klient_id, '710', 'D', abs(bal)))
+                        hv += abs(bal)
+
+                for r in rows702:
+                    u = r[0];
+                    bal = float(r[1])
+                    if bal > 0:  # A -> D
+                        cur.execute(ins, (tid, self.klient_id, u, 'D', abs(bal)))
+                        cur.execute(ins, (tid, self.klient_id, '702', 'MD', abs(bal)))
+                    else:  # P -> MD
+                        cur.execute(ins, (tid, self.klient_id, u, 'MD', abs(bal)))
+                        cur.execute(ins, (tid, self.klient_id, '702', 'D', abs(bal)))
+
+                if hv > 0:
+                    cur.execute(ins, (tid, self.klient_id, '710', 'MD', abs(hv)))
+                    cur.execute(ins, (tid, self.klient_id, '702', 'D', abs(hv)))
+                elif hv < 0:
+                    cur.execute(ins, (tid, self.klient_id, '710', 'D', abs(hv)))
+                    cur.execute(ins, (tid, self.klient_id, '702', 'MD', abs(hv)))
+
+                conn.commit()
+                return f"✅ Uzavřeno {rok}."
+        except Exception as e:
+            return f"Chyba: {e}"
+
+    def otevrit_novy_rok(self, stary_rok):
+        nr = stary_rok + 1;
+        d = date(nr, 1, 1)
+
+        sql = "SELECT P.ucet, P.smer, P.castka FROM UcetniPohyby P JOIN Transakce T ON T.id=P.transakce_id WHERE T.doklad_cislo=? AND P.klient_id=? AND P.ucet NOT IN ('702','710')"
+        rows = execute_query(sql, (f"UZAV-{stary_rok}", self.klient_id))
+
+        sqlhv = "SELECT SUM(CASE WHEN P.smer='D' THEN P.castka ELSE -P.castka END) FROM UcetniPohyby P JOIN Transakce T ON T.id=P.transakce_id WHERE T.doklad_cislo=? AND P.ucet='702'"
+        reshv = execute_query(sqlhv, (f"UZAV-{stary_rok}", self.klient_id))
+        hv = reshv[0][0] if reshv and reshv[0][0] else 0.0
+
+        if not rows and abs(hv) < 0.01: return "Chybí uzávěrka."
+
+        self.zajisti_existenci_uctu("701", "Počáteční účet")
+        self.zajisti_existenci_uctu("431", "HV ve schvalovacím")
+
+        try:
+            with Database() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO Transakce (klient_id, datum, popis, doklad_cislo, created_at) VALUES (?,?,?,?, GETDATE())",
+                    (self.klient_id, d, f"Počátek {nr}", f"POC-{nr}"))
+                cur.execute("SELECT SCOPE_IDENTITY()")
+                tid = cur.fetchone()[0]
+                ins = "INSERT INTO UcetniPohyby (transakce_id, klient_id, ucet, smer, castka) VALUES (?,?,?,?,?)"
+
+                for r in rows:
+                    u = r[0];
+                    s = r[1];
+                    val = r[2]
+                    if s == 'D':
+                        cur.execute(ins, (tid, self.klient_id, u, 'MD', val))
+                        cur.execute(ins, (tid, self.klient_id, '701', 'D', val))
+                    else:
+                        cur.execute(ins, (tid, self.klient_id, u, 'D', val))
+                        cur.execute(ins, (tid, self.klient_id, '701', 'MD', val))
+
+                if abs(hv) > 0.005:
+                    if hv > 0:  # Zisk (byl na 702 D) -> 431 D
+                        cur.execute(ins, (tid, self.klient_id, '431', 'D', abs(hv)))
+                        cur.execute(ins, (tid, self.klient_id, '701', 'MD', abs(hv)))
+                    else:
+                        cur.execute(ins, (tid, self.klient_id, '431', 'MD', abs(hv)))
+                        cur.execute(ins, (tid, self.klient_id, '701', 'D', abs(hv)))
+
+                conn.commit()
+                return f"✅ Otevřeno {nr}."
+        except Exception as e:
+            return f"Chyba: {e}"

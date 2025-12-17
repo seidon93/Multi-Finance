@@ -907,15 +907,20 @@ def zobrazit_uzaverku():
             datum_uctovani = st.date_input("Datum účetní závěrky:", value=default_uzav)
 
         with col_710_btn:
-            if st.button("🚀 Provést převod na 710", type="primary", width="stretch"):
+            # 1. Zde si rezervujeme místo PRO ZPRÁVU (nad tlačítkem)
+            zprava_placeholder = st.empty()
+
+            # 2. Tlačítko je až pod tím
+            if st.button("🚀 Provést převod na 710", type="primary", use_container_width=True):
                 # Voláme backend
                 vysledek = engine.provest_uctovani_uzaverky_710(datum_uctovani)
 
+                # 3. Výsledek vypíšeme do rezervovaného místa NAHOŘE
                 if "✅" in vysledek:
-                    st.success(vysledek)
+                    zprava_placeholder.success(vysledek)
                     st.balloons()
                 else:
-                    st.error(vysledek)
+                    zprava_placeholder.error(vysledek)
 
 
 # --- Hlavní spouštěcí smyčka Streamlit ---
