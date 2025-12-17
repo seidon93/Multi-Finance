@@ -1021,27 +1021,45 @@ class AccountingEngine:
         return self.provest_rocn_uzaverku_komplet(datum_uzaverky.year)
 
     def zauctovat_dan_z_prijmu(self, datum, vypocena_dan, poznamka="Daň z příjmů PO"):
-        doklad = f"DPPO-{datum.year}"
+        # 1. Definujeme základní tvar dokladu (např. DPPO-2025)
+        base_doklad = f"DPPO-{datum.year}"
 
-        # 1. Nejprve zkusíme najít a smazat starou verzi tohoto dokladu, abychom se vyhnuli chybě UNIQUE KEY
-        check_sql = "SELECT id FROM Transakce WHERE doklad_cislo = ? AND klient_id = ?"
-        existing = execute_query(check_sql, (doklad, self.klient_id))
+        # 2. Zjistíme, jaké doklady už existují pro tento rok, abychom našli další číslo v řadě
+        sql_check = "SELECT doklad_cislo FROM Transakce WHERE doklad_cislo LIKE ? AND klient_id = ?"
+        # Hledáme vše co začíná "DPPO-2025"
+        rows = execute_query(sql_check, (f"{base_doklad}%", self.klient_id))
 
-        if existing:
-            transakce_id = existing[0][0]
-            # Smažeme starou transakci (díky CASCADE v DB se smažou i pohyby)
-            # Pokud nemáte CASCADE, museli bychom mazat i pohyby, ale předpokládáme, že DB je OK.
-            with Database() as conn:
-                conn.cursor().execute("DELETE FROM Transakce WHERE id = ?", (transakce_id,))
-                conn.commit()
-            print(f"♻️ Přeúčtování: Starý doklad {doklad} byl smazán.")
+        max_index = 0
 
-        # 2. Zajistíme existenci účtů
+        for row in rows:
+            doc = row[0]  # Např. "DPPO-2025" nebo "DPPO-2025-1" nebo "DPPO-2025-12"
+
+            # Získáme to, co je za základním tvarem
+            suffix = doc.replace(base_doklad, "")
+
+            if suffix == "":
+                # Pokud existuje čisté "DPPO-2025", bereme to jako index 1
+                if max_index < 1: max_index = 1
+            elif suffix.startswith("-"):
+                # Pokud je tam pomlčka a číslo (např "-2"), zkusíme to převést na číslo
+                try:
+                    cislo_za_pomlckou = int(suffix[1:])  # Vezme znaky za "-"
+                    if cislo_za_pomlckou > max_index:
+                        max_index = cislo_za_pomlckou
+                except:
+                    pass
+
+        # 3. Vytvoříme nové unikátní číslo (Vždy o 1 vyšší než to nejvyšší nalezené)
+        novy_index = max_index + 1
+        final_doklad = f"{base_doklad}-{novy_index}"
+
+        # 4. Zajistíme existenci účtů
         self.zajisti_existenci_uctu("591", "Daň z příjmů - splatná")
         self.zajisti_existenci_uctu("341", "Daň z příjmů")
 
-        # 3. Vytvoříme novou transakci
-        return self.save_transakce(datum, poznamka, doklad, "591", "341", vypocena_dan, 0, 'Neučtovat')
+        # 5. Vytvoříme novou transakci
+        print(f"✅ Vytvářím daňový doklad: {final_doklad}")
+        return self.save_transakce(datum, poznamka, final_doklad, "591", "341", vypocena_dan, 0, 'Neučtovat')
 
     # Wrapper pro staré volání (pro kompatibilitu)
     def provest_uctovani_uzaverky_710(self, datum_uzaverky):
