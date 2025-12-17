@@ -550,39 +550,81 @@ def zobrazit_reporty():
 
 
 def zobrazit_prehled_uctu():
-    st.header("Hlavní Přehled Účtů")
+    # --- TOTÁLNÍ CSS PRO CENTROVÁNÍ ---
+    st.markdown("""
+        <style>
+            /* 1. Kontejner pro text - vynucení středu */
+            .analytika-text-wrapper {
+                width: 100%;
+                text-align: center;
+                margin-top: 30px;
+                margin-bottom: 10px;
+            }
+            .analytika-text-wrapper span {
+                font-weight: bold;
+                font-size: 1.25rem !important;
+                color: white;
+                display: inline-block;
+            }
 
-    # --- OPRAVA FILTRŮ ---
-    # Pokud vaše funkce zobrazit_filtr_casu() hází chybu, použijeme toto standardní řešení:
-    col_d1, col_d2 = st.columns(2)
-    with col_d1:
-        d_od = st.date_input("Datum OD", value=date(date.today().year, 1, 1), key="prehled_od")
-    with col_d2:
-        d_do = st.date_input("Datum DO", value=date.today(), key="prehled_do")
+            /* 2. Cílení přímo na kontejner widgetu Streamlit */
+            div[data-testid="stVerticalBlock"] > div:has(div[data-testid="stCheckbox"]) {
+                display: flex !important;
+                justify-content: center !important;
+                width: 100% !important;
+            }
 
-    # --- PŘEPÍNAČ ANALYTIKY ---
-    # Přidáme malý toggle přepínač pod datumy
-    st.markdown("### Nastavení")
-    is_detail = st.toggle("Zobrazit detailní analytiku", value=False,
-                          help="Vypnuto: Seskupí účty jako 501.001 pod hlavní účet 501.")
+            /* 3. Vystředění samotného toggle a jeho zvětšení */
+            div[data-testid="stCheckbox"] {
+                display: flex !important;
+                justify-content: center !important;
+                width: auto !important;
+                margin: 0 auto !important;
+                zoom: 1.7; /* Ještě o něco větší pro lepší viditelnost */
+            }
 
-    st.markdown("---")
+            /* 4. Skrytí labelu, aby nezabíral místo vpravo */
+            div[data-testid="stCheckbox"] label {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            div[data-testid="stCheckbox"] div[data-testid="stWidgetLabel"] {
+                display: none !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
-    # Načtení dat (nyní předáváme parametr detailni)
+    # 1. NADPIS
+    st.header("📊 Hlavní Přehled Účtů")
+
+    # 2. FILTRY (Standardní zobrazení)
+    d_od, d_do = time_filter_ui()
+
+    # --- TATO ČÁST MUSÍ BÝT VOLNĚ V KÓDU (Mimo columns!) ---
+
+    # Textový nadpis na středu
+    st.markdown('<div class="analytika-text-wrapper"><span>Analytika v detailech</span></div>', unsafe_allow_html=True)
+
+    # Přepínač na středu
+    is_detail = st.toggle("", value=False, label_visibility="collapsed", key="toggle_FINAL_CENTER")
+
+
+    # 3. NAČTENÍ A VÝPIS DAT
     data = engine.get_report_data(d_od, d_do, detailni=is_detail)
 
     if data:
-        # Původní zobrazení tabulky
-        vsechny = data['aktiva'] + data['pasiva'] + data['naklady'] + data['vynosy']
+        vsechny = data.get('aktiva', []) + data.get('pasiva', []) + \
+                  data.get('naklady', []) + data.get('vynosy', [])
 
         if vsechny:
             df = pd.DataFrame(vsechny)
             df.columns = ['Účet', 'Název', 'Zůstatek']
-            # Formátování měny pro hezčí vzhled
-            df['Zůstatek'] = df['Zůstatek'].apply(lambda x: f"{x:,.2f} Kč")
-            st.dataframe(df, width="stretch", hide_index=True)
-        else:
-            st.info("Pro vybrané období nebyly nalezeny žádné pohyby.")
+            df['Zůstatek'] = df['Zůstatek'].apply(lambda x: f"{x:,.2f} Kč".replace(",", " ").replace(".", ","))
+
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+            hv = data.get('hospodarsky_vysledek', 0.0)
+            st.metric("Průběžný Hospodářský Výsledek (HV)", f"{hv:,.2f} Kč".replace(",", " ").replace(".", ","))
 
 
 def zobrazit_prehled_dph():
