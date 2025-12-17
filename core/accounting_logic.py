@@ -3,6 +3,7 @@ from core.database import execute_query, Database
 from core.models import UcetniPohyb
 from decimal import Decimal
 import pandas as pd
+from datetime import date, datetime
 
 
 class AccountingEngine:
@@ -11,6 +12,7 @@ class AccountingEngine:
     def __init__(self, klient_id):
         self.klient_id = klient_id
         self.zkontroluj_a_oprav_db()
+        self.opravit_strukturu_rozvrhu()
 
     def zkontroluj_a_oprav_db(self):
         """
@@ -20,11 +22,9 @@ class AccountingEngine:
         check_sql = "SELECT col_length('Klienti', 'datum_uzaverky')"
         try:
             res = execute_query(check_sql)
-            # Pokud col_length vrátí None, sloupec neexistuje
             if not res or res[0][0] is None:
                 print("⚠️ Sloupec 'datum_uzaverky' chybí. Přidávám ho...")
                 alter_sql = "ALTER TABLE Klienti ADD datum_uzaverky DATE NULL;"
-
                 with Database() as conn:
                     cursor = conn.cursor()
                     cursor.execute(alter_sql)
@@ -33,15 +33,24 @@ class AccountingEngine:
         except Exception as e:
             print(f"Chyba při kontrole/opravě DB: {e}")
 
+        try:
+            check_tr = "SELECT col_length('Transakce', 'created_at')"
+            res_tr = execute_query(check_tr)
+            if not res_tr or res_tr[0][0] is None:
+                with Database() as conn:
+                    conn.cursor().execute("ALTER TABLE Transakce ADD created_at DATETIME DEFAULT GETDATE();")
+                    conn.commit()
+        except: pass
+
         audit_sql = """
                 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='AuditLog' AND xtype='U')
                 CREATE TABLE AuditLog (
                     id INT IDENTITY(1,1) PRIMARY KEY,
                     transakce_id INT,
                     datum_zmeny DATETIME DEFAULT GETDATE(),
-                    typ_akce NVARCHAR(50), -- 'EDIT', 'DELETE'
-                    puvodni_data NVARCHAR(MAX), -- Uložíme sem starý stav jako text/JSON
-                    novy_data NVARCHAR(MAX) -- Uložíme sem nový stav
+                    typ_akce NVARCHAR(50), 
+                    puvodni_data NVARCHAR(MAX), 
+                    novy_data NVARCHAR(MAX) 
                 );
                 """
         try:
@@ -51,6 +60,29 @@ class AccountingEngine:
                 conn.commit()
         except Exception as e:
             print(f"Chyba při vytváření AuditLog: {e}")
+
+    def opravit_strukturu_rozvrhu(self):
+        """
+        Odstraní check constrainty na sloupci typ_uctu, aby šlo vložit 'Z' nebo 'P*'.
+        """
+        try:
+            with Database() as conn:
+                cursor = conn.cursor()
+                sql_find = """
+                    SELECT name 
+                    FROM sys.check_constraints 
+                    WHERE parent_object_id = OBJECT_ID('UctovyRozvrh') 
+                    AND parent_column_id = (SELECT column_id FROM sys.columns WHERE object_id = OBJECT_ID('UctovyRozvrh') AND name = 'typ_uctu')
+                """
+                cursor.execute(sql_find)
+                rows = cursor.fetchall()
+                for row in rows:
+                    c_name = row[0]
+                    # Odstraníme omezení, které brání vložení P* nebo Z
+                    cursor.execute(f"ALTER TABLE UctovyRozvrh DROP CONSTRAINT [{c_name}]")
+                    conn.commit()
+        except Exception:
+            pass
 
     def get_transakce_detail(self, transakce_id):
         """Vrátí kompletní info o transakci včetně účtů pro editaci."""
@@ -189,14 +221,10 @@ class AccountingEngine:
             print(f"Chyba při editaci: {e}")
             raise e
 
-
     def get_ucty_podle_tridy(self, trida_prefix):
-        """
-        Vrátí seznam účtů, které začínají daným číslem (např. '2' pro třídu 2).
-        Vrací list stringů ve formátu: "221 - Běžný bankovní účet".
-        """
-        # Přidáme % pro SQL LIKE (např. '2%')
-        sql = "SELECT ucet, nazev FROM UctovyRozvrh WHERE ucet LIKE ? ORDER BY ucet"
+        """Vrátí seznam účtů (cislo - nazev)."""
+        # OPRAVA: cislo místo ucet
+        sql = "SELECT cislo, nazev FROM UctovyRozvrh WHERE cislo LIKE ? ORDER BY cislo"
         try:
             results = execute_query(sql, (f"{trida_prefix}%",))
             if not results:
@@ -205,6 +233,24 @@ class AccountingEngine:
         except Exception as e:
             print(f"Chyba při načítání účtů třídy {trida_prefix}: {e}")
             return []
+
+    def get_seznam_uctu(self):
+        """Vrátí seznam všech účtů."""
+        # OPRAVA: cislo místo ucet
+        sql = "SELECT cislo, nazev FROM UctovyRozvrh ORDER BY cislo"
+        try:
+            results = execute_query(sql)
+            return [f"{row[0]} - {row[1]}" for row in results]
+        except Exception as e:
+            print(f"Chyba při načítání účtů: {e}")
+            return []
+
+    def get_ucet_nazev(self, cislo_uctu):
+        """Načte název účtu."""
+        # OPRAVA: cislo místo ucet
+        sql = "SELECT nazev FROM UctovyRozvrh WHERE cislo = ?"
+        result = execute_query(sql, (cislo_uctu,))
+        return result[0][0] if result else cislo_uctu
     def get_seznam_uctu(self):
         """Vrátí seznam všech účtů pro výběr ve formuláři (jako list stringů)."""
         sql = "SELECT ucet, nazev FROM UctovyRozvrh ORDER BY ucet"
@@ -485,7 +531,7 @@ class AccountingEngine:
         ]
 
         inserted_count = 0
-        sql = "INSERT INTO UctovyRozvrh (ucet, nazev, typ_uctu) VALUES (?, ?, ?)"
+        sql = "INSERT INTO UctovyRozvrh (cislo, nazev, typ_uctu) VALUES (?, ?, ?)"
 
         try:
             with Database() as conn:
@@ -494,7 +540,7 @@ class AccountingEngine:
                     # Pokusíme se vložit, pokud existuje, přeskočíme (nebo bychom mohli použít MERGE/UPSERT)
                     try:
                         # Rychlá kontrola existence
-                        cursor.execute("SELECT 1 FROM UctovyRozvrh WHERE ucet = ?", (ucet,))
+                        cursor.execute("SELECT 1 FROM UctovyRozvrh WHERE cislo = ?", (ucet,))
                         if not cursor.fetchone():
                             cursor.execute(sql, (ucet, nazev, typ))
                             inserted_count += 1
@@ -508,45 +554,37 @@ class AccountingEngine:
 
     # --- NOVÁ METODA: ZALOŽENÍ ÚČTU ZA BĚHU (PRO RUČNÍ VSTUP) ---
     def zajisti_existenci_uctu(self, ucet, nazev="Ručně zadaný účet"):
-        """
-        Pokud účet v databázi neexistuje, vytvoří ho, aby nespadl Foreign Key.
-        Odhadne typ účtu podle prvního čísla.
-        """
+        """Vytvoří účet, pokud neexistuje."""
         ucet = ucet.strip()
-        sql_check = "SELECT 1 FROM UctovyRozvrh WHERE ucet = ?"
+        # OPRAVA: cislo místo ucet
+        sql_check = "SELECT 1 FROM UctovyRozvrh WHERE cislo = ?"
 
-        # Odhad typu podle třídy
         prvni_znak = ucet[0]
-        if prvni_znak in ['0', '1', '2']:
-            typ = 'A'  # Aktiva
-        elif prvni_znak in ['3', '4']:
-            typ = 'P'  # Pasiva
-        elif prvni_znak == '5':
-            typ = 'N'  # Náklady
-        elif prvni_znak == '6':
-            typ = 'V'  # Výnosy
-        elif prvni_znak == '7':
-            typ = ['Z', 'P']  # Závěrkové účty
-        else:
-            typ = 'S'  # Ostatní/System
+        if prvni_znak in ['0', '1', '2']: typ = 'A'
+        elif prvni_znak in ['3', '4']: typ = 'P'
+        elif prvni_znak == '5': typ = 'N'
+        elif prvni_znak == '6': typ = 'V'
+        elif prvni_znak == '7': typ = 'Z', 'P*'
+        else: typ = 'S'
 
         try:
             with Database() as conn:
                 cursor = conn.cursor()
                 cursor.execute(sql_check, (ucet,))
                 if not cursor.fetchone():
-                    # Účet neexistuje -> Vytvoříme ho
-                    sql_insert = "INSERT INTO UctovyRozvrh (ucet, nazev, typ_uctu) VALUES (?, ?, ?)"
+                    # OPRAVA: cislo místo ucet
+                    sql_insert = "INSERT INTO UctovyRozvrh (cislo, nazev, typ_uctu) VALUES (?, ?, ?)"
                     cursor.execute(sql_insert, (ucet, nazev, typ))
                     conn.commit()
-                    return True  # Byl vytvořen
-            return False  # Už existoval
+                    return True
+            return False
         except Exception as e:
             print(f"Chyba při auto-zakládání účtu: {e}")
             return False
+
     def get_ucet_nazev(self, ucet: str) -> str:
         """Načte název účtu z účtového rozvrhu."""
-        sql = "SELECT nazev FROM UctovyRozvrh WHERE ucet = ?"
+        sql = "SELECT nazev FROM UctovyRozvrh WHERE cislo = ?"
         result = execute_query(sql, (ucet,))
         return result[0][0] if result else ucet
 
@@ -570,16 +608,7 @@ class AccountingEngine:
         return 0.0
 
     def get_pohyby_uctu(self, ucet, datum_od=None, datum_do=None):
-        """
-        Získá detailní pohyby pro konkrétní účet s volitelným časovým filtrem.
 
-        Parametry:
-        - ucet (str): Účet (včetně analytiky).
-        - datum_od (date/str): Počáteční datum období (včetně).
-        - datum_do (date/str): Koncové datum období (včetně).
-        """
-
-        # Vybíráme všechny důležité sloupce pro zobrazení v Historii
         sql = """
             SELECT 
                 T.datum,
@@ -588,57 +617,37 @@ class AccountingEngine:
                 P.smer,
                 P.castka,
                 P.ucet AS ProtipolozkaUcet,
-                (SELECT nazev FROM UctovyRozvrh WHERE ucet = P.ucet) AS NazevProtipolozky
+                (SELECT nazev FROM UctovyRozvrh WHERE cislo = P.ucet) AS NazevProtipolozky
             FROM Transakce T
             JOIN UcetniPohyby P ON T.id = P.transakce_id  
             WHERE T.klient_id = ? 
             AND P.ucet = ? 
             """
-
         params = [self.klient_id, ucet]
 
-        # --- APLIKACE ČASOVÉHO FILTRU ---
         if datum_od:
-            # Převedeme na string, pokud Streamlit vrací date objekt
-            datum_od_str = datum_od.strftime('%Y-%m-%d') if hasattr(datum_od, 'strftime') else datum_od
+            d = datum_od.strftime('%Y-%m-%d') if hasattr(datum_od, 'strftime') else datum_od
             sql += " AND T.datum >= ?"
-            params.append(datum_od_str)
-
+            params.append(d)
         if datum_do:
-            # Převedeme na string, pokud Streamlit vrací date objekt
-            datum_do_str = datum_do.strftime('%Y-%m-%d') if hasattr(datum_do, 'strftime') else datum_do
+            d = datum_do.strftime('%Y-%m-%d') if hasattr(datum_do, 'strftime') else datum_do
             sql += " AND T.datum <= ?"
-            params.append(datum_do_str)
-        # --- KONEC ČASOVÉHO FILTRU ---
+            params.append(d)
 
-        # Seřadíme podle data pro správné zobrazení historie
         sql += " ORDER BY T.datum, T.id"
 
         try:
             with Database() as conn:
                 df = pd.read_sql_query(sql, conn, params=tuple(params))
+            if df.empty: return []
 
-            if df.empty:
-                return []
-
-            # Přejmenování sloupců pro lepší výstup ve Streamlit (jako to děláte v app.py)
-            df.columns = [
-                'Datum', 'Doklad Číslo', 'Popis Transakce', 'Směr', 'Částka',
-                'Protipolozka Ucet', 'Název Protipoložky'
-            ]
-
-            # Ponecháme jen sloupce, které chceme vracet do UI pro finální zobrazení
+            df.columns = ['Datum', 'Doklad Číslo', 'Popis Transakce', 'Směr', 'Částka', 'Protipolozka Ucet',
+                          'Název Protipoložky']
             df = df[['Datum', 'Doklad Číslo', 'Popis Transakce', 'Směr', 'Částka', 'Název Protipoložky']]
-
-            # Pro zjednodušení kódu v UI/app.py přejmenujeme Název Protipoložky na "Název Účtu"
-            # aby to odpovídalo očekávané logice:
             df.rename(columns={'Název Protipoložky': 'Název Účtu'}, inplace=True)
-
-            # Převod na list slovníků pro snadnou práci ve Streamlit
             return df.to_dict('records')
-
         except Exception as e:
-            print(f"Chyba při získávání pohybů pro účet {ucet}: {e}")
+            print(f"Chyba při získávání pohybů: {e}")
             return []
 
     def spocti_zustatky(self, datum_od=None, datum_do=None):
@@ -819,22 +828,9 @@ class AccountingEngine:
 
 
     def get_report_data(self, datum_od=None, datum_do=None):
-        """
-        Vrátí data pro Rozvahu a Výsledovku na základě skutečného typu účtu v DB (A, P, N, V).
-        """
-        report = {
-            'aktiva': [],
-            'pasiva': [],
-            'naklady': [],
-            'vynosy': [],
-            'suma_aktiva': 0.0,
-            'suma_pasiva': 0.0,
-            'suma_naklady': 0.0,
-            'suma_vynosy': 0.0,
-            'hospodarsky_vysledek': 0.0
-        }
+        """Vrátí data pro Rozvahu a Výsledovku."""
+        report = {'aktiva': [], 'pasiva': [], 'naklady': [], 'vynosy': [], 'suma_aktiva': 0.0, 'suma_pasiva': 0.0, 'suma_naklady': 0.0, 'suma_vynosy': 0.0, 'hospodarsky_vysledek': 0.0}
 
-        # SQL: Spojíme Pohyby + Transakce (kvůli datu) + Rozvrh (kvůli typu účtu)
         sql = """
             SELECT 
                 P.ucet,
@@ -844,18 +840,15 @@ class AccountingEngine:
                 SUM(CASE WHEN P.smer = 'D' THEN P.castka ELSE 0 END) as SumaD
             FROM UcetniPohyby P
             JOIN Transakce T ON T.id = P.transakce_id
-            JOIN UctovyRozvrh R ON P.ucet = R.ucet
+            JOIN UctovyRozvrh R ON P.ucet = R.cislo
             WHERE P.klient_id = ?
         """
-
         params = [self.klient_id]
 
-        # Aplikace filtrů
         if datum_od:
             d_od = datum_od.strftime('%Y-%m-%d') if hasattr(datum_od, 'strftime') else datum_od
             sql += " AND T.datum >= ?"
             params.append(d_od)
-
         if datum_do:
             d_do = datum_do.strftime('%Y-%m-%d') if hasattr(datum_do, 'strftime') else datum_do
             sql += " AND T.datum <= ?"
@@ -872,68 +865,40 @@ class AccountingEngine:
             for row in rows:
                 ucet = row[0]
                 nazev = row[1]
-                typ = row[2]  # Tady máme 'A', 'P', 'N', 'V' přímo z DB
+                typ = row[2]
                 suma_md = float(row[3]) if row[3] else 0.0
                 suma_d = float(row[4]) if row[4] else 0.0
-
-                # Výpočet zůstatku (MD - D)
-                # Kladné číslo = převaha MD, Záporné číslo = převaha D
                 zustatek_raw = suma_md - suma_d
 
-                # Ignorujeme nulové zůstatky
-                if abs(zustatek_raw) < 0.01:
-                    continue
+                if abs(zustatek_raw) < 0.01: continue
 
                 polozka = {'ucet': ucet, 'nazev': nazev}
 
-                # --- LOGIKA ROZDĚLENÍ PODLE TYPU Z DB ---
-
-                if typ == 'A':  # AKTIVA
-                    # Aktiva mají mít zůstatek na MD (kladný).
+                if typ == 'A':
                     polozka['castka'] = zustatek_raw
                     report['aktiva'].append(polozka)
                     report['suma_aktiva'] += zustatek_raw
-
-                elif typ == 'P':  # PASIVA
-                    # Pasiva mají mít zůstatek na D (záporný v naší logice MD-D).
-                    # Pro report je převedeme na kladné číslo pomocí abs().
+                elif typ == 'P':
                     polozka['castka'] = abs(zustatek_raw)
                     report['pasiva'].append(polozka)
                     report['suma_pasiva'] += abs(zustatek_raw)
-
-                elif typ == 'N':  # NÁKLADY
-                    # Náklady jsou na MD (kladné)
+                elif typ == 'N':
                     polozka['castka'] = zustatek_raw
                     report['naklady'].append(polozka)
                     report['suma_naklady'] += zustatek_raw
-
-                elif typ == 'V':  # VÝNOSY
-                    # Výnosy jsou na D (záporné v logice MD-D).
-                    # Převedeme na kladné pro zobrazení.
+                elif typ == 'V':
                     polozka['castka'] = abs(zustatek_raw)
                     report['vynosy'].append(polozka)
                     report['suma_vynosy'] += abs(zustatek_raw)
 
-                # (Typy Z, S atd. zatím ignorujeme, pokud nejsou součástí výkazů)
-
-            # --- VÝPOČET ZISKU (HV) ---
-            # Zisk = Výnosy - Náklady
             hv = report['suma_vynosy'] - report['suma_naklady']
             report['hospodarsky_vysledek'] = hv
 
-            # --- ZAROVNÁNÍ BILANCE ---
-            # Zisk je zdrojem krytí majetku -> patří do PASIV
-            # Ztráta snižuje vlastní kapitál -> snižuje PASIVA (je tam jako záporná položka nebo minus v pasivech)
             if abs(hv) > 0.005:
-                report['pasiva'].append({
-                    'ucet': 'HV',
-                    'nazev': 'Výsledek hospodaření (Zisk/Ztráta)',
-                    'castka': hv  # Pokud je zisk, přičte se k pasivům. Pokud ztráta, odečte se.
-                })
+                report['pasiva'].append({'ucet': 'HV', 'nazev': 'Výsledek hospodaření', 'castka': hv})
                 report['suma_pasiva'] += hv
 
             return report
-
         except Exception as e:
             print(f"Chyba při generování reportu: {e}")
             return report

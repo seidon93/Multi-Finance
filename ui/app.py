@@ -95,7 +95,7 @@ st.markdown(
         border-color: #e65100 !important;
         color: #e65100 !important;
     }
-    
+
     </style>
     """,
     unsafe_allow_html=True
@@ -132,7 +132,7 @@ def zobrazit_header():
 
     vyber = st.sidebar.radio(
         "Zvolte Modul:",
-        ("Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty","Uzávěrka")
+        ("Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty", "Uzávěrka")
     )
     return vyber
 
@@ -338,7 +338,6 @@ def time_filter_ui():
         if q4.button("4. Čtvrtletí (Q4)", width="stretch"):
             set_dates(date(aktualni_rok, 10, 1), date(aktualni_rok, 12, 31))
 
-
         # Řádek 3: Ruční výběr a Reset
         col_from, col_to, col_reset = st.columns([1.2, 1.2, 0.7], vertical_alignment="bottom")
 
@@ -535,6 +534,7 @@ def zobrazit_reporty():
                 st.caption("Žádná pasiva (kromě HV).")
         else:
             st.caption("Žádná pasiva.")
+
 
 def zobrazit_prehled_uctu():
     st.header("Hlavní Přehled Účtů")
@@ -773,7 +773,6 @@ def zobrazit_historii_uctu():
         }
     )
 
-
     # --- 4. SEKCE EDITACE ---
     st.subheader("✏️ Upravit vybranou transakci")
 
@@ -917,6 +916,7 @@ def zobrazit_uzaverku():
                     st.balloons()
                 else:
                     st.error(vysledek)
+
 
 # --- Hlavní spouštěcí smyčka Streamlit ---
 if __name__ == "__main__":
