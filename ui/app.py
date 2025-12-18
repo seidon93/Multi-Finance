@@ -153,13 +153,6 @@ def zobrazit_header():
 def formular_nova_transakce():
     st.header("Vytvořit Novou Transakci")
 
-    #  --- UPDATE DB TLAČÍTKO (Jen pro prvotní naplnění) ---
-    # with st.expander("⚙️ Správa databáze"):
-    #     if st.button("Nahrát kompletní účtovou osnovu (cca 80 účtů)"):
-    #         zprava = engine.inicializuj_uctovy_rozvrh()
-    #         st.success(zprava)
-    #         # st.rerun() # Odkomentujte, pokud chcete hned refreshnout stránku
-
     # --- DEFINICE ÚČETNÍCH TŘÍD PRO VÝBĚR ---
     tridy_uctu = [
         "0 - Dlouhodobý majetek",
@@ -182,7 +175,7 @@ def formular_nova_transakce():
     st.markdown("---")
 
     # === PŘEPÍNAČ REŽIMU ZADÁVÁNÍ ===
-    manualni_rezim = st.checkbox("✍️ Zadat účty ručně (pro vlastní analytiku)", value=False)
+    manualni_rezim = st.checkbox("✍️ Zadat účty ručně pro vlastní analytiku", value=False)
 
     c_md, c_dal = st.columns(2)
 
@@ -240,7 +233,7 @@ def formular_nova_transakce():
 
     # --- ULOŽENÍ ---
     st.markdown("")
-    if st.button("Uložit Transakci", type="primary", width="stretch"):
+    if st.button("Uložit Transakci", type="primary", use_container_width=True):
         if castka_bez_dph <= 0:
             st.error("Zadejte částku.")
         elif not ucet_md_zaklad or not ucet_dal_zaklad:
@@ -255,19 +248,25 @@ def formular_nova_transakce():
                     engine.zajisti_existenci_uctu(ucet_md_zaklad, n_md)
                     engine.zajisti_existenci_uctu(ucet_dal_zaklad, n_d)
 
-                # 2. Uložení
+                # 2. Uložení se zachycením chyb standardů (ČÚS)
                 tid = engine.save_transakce(
                     datum=datum_transakce, popis=popis, doklad_cislo=doklad_cislo,
                     ucet_md_zaklad=ucet_md_zaklad, ucet_dal_zaklad=ucet_dal_zaklad,
                     castka_bez_dph=castka_bez_dph, sazba_dph=vybrana_sazba, smer_dph_popis=smer_dph
-                )  # <--- ZDE BYLA CHYBA (DOPLNĚNA ZÁVORKA)
+                )
 
                 if tid:
                     st.success(f"✅ Transakce uložena! (ID {tid})")
+                    st.balloons()
                 else:
                     st.error("❌ Chyba při ukládání (zkontrolujte duplicitu čísla dokladu).")
 
+            except ValueError as ve:
+                # Tady zobrazíme "hezké okýnko" s textem chyby z validace ČÚS
+                st.error(f"⚠️ **Účetní kontrola:** {str(ve)}")
+
             except Exception as e:
+                # Ostatní neočekávané technické chyby
                 st.exception(f"FATÁLNÍ CHYBA: {e}")
 
 
@@ -621,7 +620,7 @@ def zobrazit_prehled_uctu():
             df.columns = ['Účet', 'Název', 'Zůstatek']
             df['Zůstatek'] = df['Zůstatek'].apply(lambda x: f"{x:,.2f} Kč".replace(",", " ").replace(".", ","))
 
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width="stretch", hide_index=True)
 
             hv = data.get('hospodarsky_vysledek', 0.0)
             st.metric("Průběžný Hospodářský Výsledek (HV)", f"{hv:,.2f} Kč".replace(",", " ").replace(".", ","))
