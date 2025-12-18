@@ -237,14 +237,16 @@ def formular_nova_transakce():
 
         c_md, c_dal = st.columns(2)
 
-        # --- LOGIKA PRO MD ---
+        # Společné definice tříd pro selectboxy
+        tridy_uctu = ["0 - Dlouhodobý majetek", "1 - Zásoby", "2 - Krát. fin. majetek", "3 - Zúčtovací vztahy",
+                      "4 - Kapitálové účty", "5 - Náklady", "6 - Výnosy"]
+
+        # --- LOGIKA PRO MD (Má Dáti) ---
         with c_md:
             st.subheader("MD (Má Dáti)")
             if manualni_rezim:
                 ucet_md_zaklad = st.text_input("Číslo účtu MD", placeholder="např. 518.001", key="md_man")
             else:
-                tridy_uctu = ["0 - Dlouhodobý majetek", "1 - Zásoby", "2 - Krát. fin. majetek", "3 - Zúčtovací vztahy",
-                              "4 - Kapitálové účty", "5 - Náklady", "6 - Výnosy"]
                 trida_md_sel = st.selectbox("Třída", tridy_uctu, key="t_md")
                 prefix_md = trida_md_sel.split(" - ")[0]
                 zakladni_ucty_md = engine.get_zakladni_ucty_podle_tridy(prefix_md)
@@ -253,15 +255,18 @@ def formular_nova_transakce():
                 if vyber_zaklad_md:
                     cislo_zaklad_md = vyber_zaklad_md.split(" - ")[0]
                     analytika_md = engine.get_analytika_pro_ucet(cislo_zaklad_md)
+
                     if analytika_md:
-                        vyber_analytika_md = st.selectbox("↳ Analytický podúčet", analytika_md, key="u_md_anal")
+                        # PŘIDÁNO: Možnost zvolit syntetický účet i když existuje analytika
+                        moznosti_md = [f"{cislo_zaklad_md} - Bez analytiky"] + analytika_md
+                        vyber_analytika_md = st.selectbox("Podúčet", moznosti_md, key="u_md_anal")
                         ucet_md_zaklad = vyber_analytika_md.split(" - ")[0]
                     else:
                         ucet_md_zaklad = cislo_zaklad_md
                 else:
                     ucet_md_zaklad = None
 
-        # --- LOGIKA PRO DAL ---
+        # --- LOGIKA PRO D (Dal) ---
         with c_dal:
             st.subheader("D (Dal)")
             if manualni_rezim:
@@ -275,8 +280,11 @@ def formular_nova_transakce():
                 if vyber_zaklad_d:
                     cislo_zaklad_d = vyber_zaklad_d.split(" - ")[0]
                     analytika_d = engine.get_analytika_pro_ucet(cislo_zaklad_d)
+
                     if analytika_d:
-                        vyber_analytika_d = st.selectbox("↳ Analytický podúčet", analytika_d, key="u_d_anal")
+                        # PŘIDÁNO: Možnost zvolit syntetický účet i když existuje analytika
+                        moznosti_d = [f"{cislo_zaklad_d} - Bez analytiky"] + analytika_d
+                        vyber_analytika_d = st.selectbox("Podúčet", moznosti_d, key="u_d_anal")
                         ucet_dal_zaklad = vyber_analytika_d.split(" - ")[0]
                     else:
                         ucet_dal_zaklad = cislo_zaklad_d
@@ -288,6 +296,7 @@ def formular_nova_transakce():
         col_castka, col_prev = st.columns(2)
         raw_castka = col_castka.text_input("Částka bez DPH", placeholder="1.2m, 50k", key="money_in")
         castka_bez_dph = parse_input_money(raw_castka)
+
         if castka_bez_dph > 0:
             col_prev.metric("K zaúčtování", f"{castka_bez_dph:,.2f} Kč".replace(",", " "))
 
@@ -297,9 +306,39 @@ def formular_nova_transakce():
         smer_dph = c_dph2.radio("Typ DPH", ['Neučtovat', 'DPH na VSTUPU (MD)', 'DPH na VÝSTUPU (D)'], horizontal=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
+
+        # --- TLAČÍTKO ULOŽIT ---
         if st.button("Uložit Transakci", type="primary", use_container_width=True):
-            # ... logika uložení (beze změny) ...
-            pass
+            if castka_bez_dph <= 0:
+                st.error("Zadejte částku.")
+            elif not ucet_md_zaklad or not ucet_dal_zaklad:
+                st.error("Vyplňte oba účty.")
+            else:
+                try:
+                    # 1. Pokud je manuální režim, zajistíme, že účty v DB existují
+                    if manualni_rezim:
+                        engine.zajisti_existenci_uctu(ucet_md_zaklad, "Ručně vytvořený účet")
+                        engine.zajisti_existenci_uctu(ucet_dal_zaklad, "Ručně vytvořený účet")
+
+                    # 2. Uložení se zachycením chyb standardů (ČÚS)
+                    tid = engine.save_transakce(
+                        datum=datum_transakce, popis=popis, doklad_cislo=doklad_cislo,
+                        ucet_md_zaklad=ucet_md_zaklad, ucet_dal_zaklad=ucet_dal_zaklad,
+                        castka_bez_dph=castka_bez_dph, sazba_dph=vybrana_sazba, smer_dph_popis=smer_dph
+                    )
+
+                    if tid:
+                        st.success(f"✅ Transakce uložena! (ID {tid})")
+                        st.balloons()
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Chyba při ukládání (zkontrolujte duplicitu čísla dokladu).")
+
+                except ValueError as ve:
+                    st.error(f"⚠️ **Účetní kontrola:** {str(ve)}")
+                except Exception as e:
+                    st.exception(f"FATÁLNÍ CHYBA: {e}")
 
 
 def time_filter_ui():
