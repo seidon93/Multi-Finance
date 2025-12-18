@@ -11,10 +11,9 @@ class AccountingEngine:
 
     def __init__(self, klient_id):
         self.klient_id = klient_id
-        # Kontrola základních sloupců
         self.zkontroluj_a_oprav_db()
-        # Oprava constraintů a typu P* pro 799
         self.opravit_strukturu_rozvrhu()
+        self.metoda_zasob = metoda_zasob
 
     def zkontroluj_a_oprav_db(self):
         """Zkontroluje a doplní základní sloupce (datum_uzaverky, created_at, AuditLog)."""
@@ -930,43 +929,46 @@ class AccountingEngine:
             return None
 
     def validuj_ceske_standardy(self, ucet_md, ucet_dal):
-        """
-        Provádí validaci účetních zápisů podle českých standardů a zvyklostí.
-        Vyhazuje ValueError v případě nepřípustné kontace.
-        """
+        """Rozšířená validace o metody zásob A/B."""
         u_md = str(ucet_md)
         u_dal = str(ucet_dal)
 
-        # Definice skupin účtů
-        penezni_skupiny = ('211', '221', '213')  # Pokladny, bankovní účty, ceniny
-        vysledovkovy_prefix = ('5', '6')  # Náklady a výnosy
+        # Základní kontroly (Peníze na cestě, Výsledovka proti sobě) zůstávají...
+        penezni = ('211', '221', '213')
+        if any(u_md.startswith(p) for p in penezni) and any(u_dal.startswith(p) for p in penezni):
+            raise ValueError("Přímý převod mezi pokladnou/bankou není povolen. Použijte 261.")
 
-        # KONTROLA A: Převody peněz (vždy přes 261)
-        # Nelze účtovat 211/221 přímo. Musí se použít MD 261 / D 211 nebo MD 221 / D 261.
-        if any(u_md.startswith(p) for p in penezni_skupiny) and \
-                any(u_dal.startswith(p) for p in penezni_skupiny):
-            raise ValueError(
-                "CHYBA (Standard ČR): Přímý převod mezi pokladnou a bankou není povolen. "
-                "Použijte zúčtovací účet 261 (Peníze na cestě)."
-            )
-
-        # KONTROLA B: Výsledovkové účty proti sobě
-        # V ČR se zásadně neúčtuje MD 5xx / D 6xx. Náklady a výnosy jdou vždy proti rozvaze.
-        if u_md.startswith(vysledovkovy_prefix) and u_dal.startswith(vysledovkovy_prefix):
-            raise ValueError(
-                "CHYBA (Standard ČR): Nelze účtovat nákladový účet přímo proti výnosovému. "
-                "Operace musí být zachycena přes příslušný rozvahový účet (pohledávka, závazek, peníze)."
-            )
-
-        # KONTROLA C: Přímé účtování na závěrkové účty (mimo uzávěrku)
-        zaverkové_ucty = ('701', '702', '710')
-        if (any(u_md.startswith(z) for z in zaverkové_ucty) or \
-                any(u_dal.startswith(z) for z in zaverkové_ucty)):
-            # Tato kontrola je volnější, ale v běžném roce by se na 7xx účtovat nemělo
-            pass
+        # SPECIFICKÁ LOGIKA PRO ZÁSOBY
+        if self.metoda_zasob == 'A':
+            # Metoda A: Nákup nesmí jít přímo na 112/132, musí přes 111/131
+            if u_md.startswith(('112', '132')) and u_dal.startswith('321'):
+                raise ValueError("Při metodě A nelze účtovat nákup přímo na sklad. Použijte 111 nebo 131.")
+        else:
+            # Metoda B: Nákup jde přímo do nákladů (501/504)
+            if u_md.startswith(('112', '132')) and u_dal.startswith('321'):
+                raise ValueError(
+                    "Při metodě B účtujte nákup přímo do nákladů (501/504). Účty 112/132 jsou pouze pro uzávěrku.")
 
         return True
 
+    def provest_operaci_zasoby_uzaverka(self, rok, zustatek_skladu, typ='material'):
+        """
+        Operace se zásobami pro Metodu B na konci roku.
+        Převede počáteční stav do nákladů a nový zůstatek na sklad.
+        """
+        self.zkontroluj_zda_je_otevreno(date(rok, 12, 31))
+        u_sklad = '112' if typ == 'material' else '132'
+        u_spotreba = '501' if typ == 'material' else '504'
+
+        # 1. Vyúčtování počátečního stavu do nákladů: MD 501 / D 112
+        stary_zustatek = self.get_zustatek_uctu(u_sklad)
+        if abs(stary_zustatek) > 0:
+            self.save_transakce(date(rok, 12, 31), f"B: Převod počátečního stavu {typ}u",
+                                f"ZAS-{rok}-01", u_spotreba, u_sklad, abs(stary_zustatek), 0, 'Neučtovat')
+
+        # 2. Zápis konečného stavu na sklad: MD 112 / D 501
+        return self.save_transakce(date(rok, 12, 31), f"B: Konečný stav {typ}u dle inventury",
+                                   f"ZAS-{rok}-02", u_sklad, u_spotreba, zustatek_skladu, 0, 'Neučtovat')
 
     # --- PŘEPRACOVANÁ METODA PRO UKLÁDÁNÍ TRANSAKCE (Nyní s DPH) ---
     def save_transakce(self, datum, popis, doklad_cislo, ucet_md_zaklad, ucet_dal_zaklad, castka_bez_dph, sazba_dph,

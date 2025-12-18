@@ -23,10 +23,20 @@ load_dotenv()
 DB_PASSWORD = os.environ.get("DB_PASSWORD")
 
 KLIENT_ID = 1
+if 'metoda_zasob' not in st.session_state:
+    st.session_state.metoda_zasob = 'B'
 
 # Inicializace účetního enginu (globálně)
-# Předpokládáme, že tato třída je správně napojena na Vaši databázi.
 engine = AccountingEngine(klient_id=KLIENT_ID)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("⚙️ Nastavení systému")
+st.session_state.metoda_zasob = st.sidebar.radio(
+    "Metoda účtování zásob:",
+    ('A', 'B'),
+    index=1 if st.session_state.metoda_zasob == 'B' else 0,
+    help="A = Průběžně přes pořízení (111), B = Přímo do nákladů (501)."
+)
 
 # --- CSS STYLING (Nezměněno) ---
 st.markdown(
@@ -1048,6 +1058,25 @@ def zobrazit_uzaverku():
         if st.button("🔓 Odemknout", type="secondary"):
             engine.set_datum_uzaverky(None)
             st.rerun()
+
+    with tabs[3]:  # Předpokládáme, že přidáte nový tab nebo rozšíříte stávající
+        st.subheader("📦 Roční úprava zásob (Metoda B)")
+        if st.session_state.metoda_zasob == 'A':
+            st.info("Při metodě A probíhá účtování zásob průběžně. Zde nejsou vyžadovány žádné kroky.")
+        else:
+            with st.form("form_zasoby_b"):
+                rok_zas = st.number_input("Rok", value=date.today().year, step=1)
+                stav_mat = st.number_input("Konečný stav materiálu (112) dle inventury", min_value=0.0)
+                stav_zbo = st.number_input("Konečný stav zboží (132) dle inventury", min_value=0.0)
+
+                if st.form_submit_button("💾 Zaúčtovat stavy zásob"):
+                    try:
+                        res1 = engine.provest_operaci_zasoby_uzaverka(rok_zas, stav_mat, 'material')
+                        res2 = engine.provest_operaci_zasoby_uzaverka(rok_zas, stav_zbo, 'zbozi')
+                        if res1 and res2:
+                            st.success("✅ Zásoby byly úspěšně přeceněny dle inventury.")
+                    except Exception as e:
+                        st.error(f"Chyba: {e}")
 
 
 # --- Hlavní spouštěcí smyčka Streamlit ---
