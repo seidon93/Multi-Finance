@@ -213,38 +213,53 @@ def formular_nova_transakce():
         st.subheader("MD (Má Dáti)")
         if manualni_rezim:
             ucet_md_zaklad = st.text_input("Číslo účtu MD", placeholder="např. 518.001")
-            nazev_md_manual = st.text_input("Název účtu MD (pro nový účet)", placeholder="Volitelné", key="n_md")
         else:
-            # Výběrový režim
             trida_md_sel = st.selectbox("Třída", tridy_uctu, key="t_md")
             prefix_md = trida_md_sel.split(" - ")[0]
-            ucty_md_list = engine.get_ucty_podle_tridy(prefix_md)
 
-            if ucty_md_list:
-                vyber_md = st.selectbox("Účet", ucty_md_list, key="u_md")
-                ucet_md_zaklad = vyber_md.split(" - ")[0].strip()
+            # 1. Hlavní výběr základního účtu
+            zakladni_ucty_md = engine.get_zakladni_ucty_podle_tridy(prefix_md)
+            vyber_zaklad_md = st.selectbox("Základní účet", zakladni_ucty_md, key="u_md_base")
+
+            if vyber_zaklad_md:
+                cislo_zaklad_md = vyber_zaklad_md.split(" - ")[0]
+                analytika_md = engine.get_analytika_pro_ucet(cislo_zaklad_md)
+
+                if analytika_md:
+                    # 2. Analytický podúčet se zobrazí jen když existuje
+                    vyber_analytika_md = st.selectbox("Analytický podúčet", analytika_md, key="u_md_anal")
+                    ucet_md_zaklad = vyber_analytika_md.split(" - ")[0]
+                else:
+                    ucet_md_zaklad = cislo_zaklad_md
             else:
-                st.warning("Žádné účty.")
                 ucet_md_zaklad = None
 
-    # --- LOGIKA PRO D ---
-    with c_dal:
-        st.subheader("D (Dal)")
-        if manualni_rezim:
-            ucet_dal_zaklad = st.text_input("Číslo účtu D", placeholder="např. 321")
-            nazev_d_manual = st.text_input("Název účtu D (pro nový účet)", placeholder="Volitelné", key="n_d")
-        else:
-            # Výběrový režim (Defaultně třída 3 nebo 2)
-            trida_d_sel = st.selectbox("Třída", tridy_uctu, index=2, key="t_d")
-            prefix_d = trida_d_sel.split(" - ")[0]
-            ucty_d_list = engine.get_ucty_podle_tridy(prefix_d)
-
-            if ucty_d_list:
-                vyber_d = st.selectbox("Účet", ucty_d_list, key="u_d")
-                ucet_dal_zaklad = vyber_d.split(" - ")[0].strip()
+    # --- LOGIKA PRO DAL ---
+        with c_dal:
+            st.subheader("D (Dal)")
+            if manualni_rezim:
+                ucet_dal_zaklad = st.text_input("Číslo účtu D", placeholder="např. 321", key="dal_man")
             else:
-                st.warning("Žádné účty.")
-                ucet_dal_zaklad = None
+                # Defaultně nastavíme index 2 (třída 2 - Peníze) nebo 3 (třída 3 - Vztahy) pro stranu D
+                trida_d_sel = st.selectbox("Třída", tridy_uctu, index=2, key="t_d")
+                prefix_d = trida_d_sel.split(" - ")[0]
+
+                # 1. Výběr základního účtu (3 cifry)
+                zakladni_ucty_d = engine.get_zakladni_ucty_podle_tridy(prefix_d)
+                vyber_zaklad_d = st.selectbox("Základní účet", zakladni_ucty_d, key="u_d_base")
+
+                if vyber_zaklad_d:
+                    cislo_zaklad_d = vyber_zaklad_d.split(" - ")[0]
+                    analytika_d = engine.get_analytika_pro_ucet(cislo_zaklad_d)
+
+                    if analytika_d:
+                        # 2. Výběr analytiky (zobrazí se jen pokud existuje)
+                        vyber_analytika_d = st.selectbox("Analytický podúčet", analytika_d, key="u_d_anal")
+                        ucet_dal_zaklad = vyber_analytika_d.split(" - ")[0]
+                    else:
+                        ucet_dal_zaklad = cislo_zaklad_d
+                else:
+                    ucet_dal_zaklad = None
 
     # --- ČÁSTKA A ZBYTEK ---
     st.markdown("---")

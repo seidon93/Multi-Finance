@@ -1292,3 +1292,25 @@ class AccountingEngine:
                 return f"✅ Otevřeno {nr} (Doklad POC-{nr})."
         except Exception as e:
             return f"Chyba: {e}"
+
+    def get_zakladni_ucty_podle_tridy(self, trida_prefix):
+        """Vrátí pouze trojciferné základní účty (např. 501, 511)."""
+        # Používáme LEN(cislo) = 3, aby se odfiltrovala analytika (501.001 atd.)
+        sql = "SELECT cislo, nazev FROM UctovyRozvrh WHERE cislo LIKE ? AND LEN(cislo) = 3 ORDER BY cislo"
+        try:
+            results = execute_query(sql, (f"{trida_prefix}%",))
+            return [f"{row[0]} - {row[1]}" for row in results]
+        except Exception as e:
+            print(f"Chyba při načítání základních účtů: {e}")
+            return []
+
+    def get_analytika_pro_ucet(self, zaklad_cislo):
+        """Vrátí podúčty pro daný základ (např. pro 501 najde 501.001)."""
+        # Hledáme účty, které začínají "501." a mají více než 3 znaky
+        sql = "SELECT cislo, nazev FROM UctovyRozvrh WHERE cislo LIKE ? AND LEN(cislo) > 3 ORDER BY cislo"
+        try:
+            results = execute_query(sql, (f"{zaklad_cislo}.%",))
+            return [f"{row[0]} - {row[1]}" for row in results]
+        except Exception as e:
+            print(f"Chyba při načítání analytiky: {e}")
+            return []
