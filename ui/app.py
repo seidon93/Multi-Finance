@@ -237,9 +237,17 @@ def formular_nova_transakce():
 
         c_md, c_dal = st.columns(2)
 
-        # Společné definice tříd pro selectboxy
-        tridy_uctu = ["0 - Dlouhodobý majetek", "1 - Zásoby", "2 - Krát. fin. majetek", "3 - Zúčtovací vztahy",
-                      "4 - Kapitálové účty", "5 - Náklady", "6 - Výnosy"]
+        # --- DEFINICE ÚČETNÍCH TŘÍD (DOPLNĚNA TŘÍDA 7) ---
+        tridy_uctu = [
+            "0 - Dlouhodobý majetek",
+            "1 - Zásoby",
+            "2 - Krát. fin. majetek",
+            "3 - Zúčtovací vztahy",
+            "4 - Kapitálové účty",
+            "5 - Náklady",
+            "6 - Výnosy",
+            "7 - Závěrkové a podrozvahové účty"
+        ]
 
         # --- LOGIKA PRO MD (Má Dáti) ---
         with c_md:
@@ -257,9 +265,9 @@ def formular_nova_transakce():
                     analytika_md = engine.get_analytika_pro_ucet(cislo_zaklad_md)
 
                     if analytika_md:
-                        # PŘIDÁNO: Možnost zvolit syntetický účet i když existuje analytika
-                        moznosti_md = [f"{cislo_zaklad_md} - Bez analytiky"] + analytika_md
-                        vyber_analytika_md = st.selectbox("Podúčet", moznosti_md, key="u_md_anal")
+                        # Možnost zvolit syntetický účet i když existuje analytika
+                        moznosti_md = [f"{cislo_zaklad_md} - Bez analytiky (syntetika)"] + analytika_md
+                        vyber_analytika_md = st.selectbox("↳ Podúčet", moznosti_md, key="u_md_anal")
                         ucet_md_zaklad = vyber_analytika_md.split(" - ")[0]
                     else:
                         ucet_md_zaklad = cislo_zaklad_md
@@ -282,9 +290,9 @@ def formular_nova_transakce():
                     analytika_d = engine.get_analytika_pro_ucet(cislo_zaklad_d)
 
                     if analytika_d:
-                        # PŘIDÁNO: Možnost zvolit syntetický účet i když existuje analytika
-                        moznosti_d = [f"{cislo_zaklad_d} - Bez analytiky"] + analytika_d
-                        vyber_analytika_d = st.selectbox("Podúčet", moznosti_d, key="u_d_anal")
+                        # Možnost zvolit syntetický účet i když existuje analytika
+                        moznosti_d = [f"{cislo_zaklad_d} - Bez analytiky (syntetika)"] + analytika_d
+                        vyber_analytika_d = st.selectbox("↳ Podúčet", moznosti_d, key="u_d_anal")
                         ucet_dal_zaklad = vyber_analytika_d.split(" - ")[0]
                     else:
                         ucet_dal_zaklad = cislo_zaklad_d
@@ -315,12 +323,10 @@ def formular_nova_transakce():
                 st.error("Vyplňte oba účty.")
             else:
                 try:
-                    # 1. Pokud je manuální režim, zajistíme, že účty v DB existují
                     if manualni_rezim:
                         engine.zajisti_existenci_uctu(ucet_md_zaklad, "Ručně vytvořený účet")
                         engine.zajisti_existenci_uctu(ucet_dal_zaklad, "Ručně vytvořený účet")
 
-                    # 2. Uložení se zachycením chyb standardů (ČÚS)
                     tid = engine.save_transakce(
                         datum=datum_transakce, popis=popis, doklad_cislo=doklad_cislo,
                         ucet_md_zaklad=ucet_md_zaklad, ucet_dal_zaklad=ucet_dal_zaklad,
@@ -904,7 +910,7 @@ def zobrazit_historii_uctu():
                     st.markdown("**Účetní data (Zadejte novou správnou kontaci):**")
 
                     tridy_uctu = ["0 - Dlouhodobý majetek", "1 - Zásoby", "2 - Finanční účty", "3 - Zúčtovací vztahy",
-                                  "4 - Kapitálové účty", "5 - Náklady", "6 - Výnosy"]
+                                  "4 - Kapitálové účty", "5 - Náklady", "6 - Výnosy", "7 - Závěrkové účty"]
 
                     ce1, ce2 = st.columns(2)
                     with ce1:
