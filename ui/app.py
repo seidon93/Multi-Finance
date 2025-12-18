@@ -26,22 +26,40 @@ KLIENT_ID = 1
 if 'metoda_zasob' not in st.session_state:
     st.session_state.metoda_zasob = 'B'
 
-# Inicializace účetního enginu (globálně)
-engine = AccountingEngine(klient_id=KLIENT_ID)
-
-st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Nastavení systému")
 st.session_state.metoda_zasob = st.sidebar.radio(
     "Metoda účtování zásob:",
     ('A', 'B'),
     index=1 if st.session_state.metoda_zasob == 'B' else 0,
     help="A = Průběžně přes pořízení (111), B = Přímo do nákladů (501)."
+
 )
+
+# Inicializace účetního enginu (globálně)
+engine = AccountingEngine(klient_id=KLIENT_ID)
+metoda_zasob=st.session_state.metoda_zasob
+
 
 # --- CSS STYLING (Nezměněno) ---
 st.markdown(
     """
     <style>
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+        gap: 0.5rem !important; /* Původně je tam 1rem nebo více */
+        }
+
+    /* Specifické zmenšení horního a spodního okraje u oddělovače */
+    [data-testid="stSidebar"] hr {
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+    
+    /* Zmenšení nadpisu Navigace, aby nepůsobil tak obrovsky */
+    [data-testid="stSidebar"] h1 {
+        font-size: 1.4rem !important;
+        margin-bottom: 0px !important;
+    }
+    
     /* Obecné styly pro mřížku */
     [data-testid="stColumn"] {
         flex: 1 1 0% !important;
@@ -150,9 +168,10 @@ def parse_input_money(text_value):
 
 def zobrazit_header():
     """Vytvoří hlavičku a navigační menu."""
-    st.title("💰 Multi-Finance Účetní Systém")
-    st.sidebar.title("Navigace")
 
+    st.title("💰 Multi-Finance Účetní Systém")
+    st.sidebar.markdown("-------")
+    st.sidebar.title("Navigace")
     vyber = st.sidebar.radio(
         "Zvolte Modul:",
         ("Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty", "Uzávěrka")

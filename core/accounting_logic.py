@@ -9,7 +9,7 @@ import os
 class AccountingEngine:
     """Třída pro výpočet účetních dat a reportů."""
 
-    def __init__(self, klient_id):
+    def __init__(self, klient_id, metoda_zasob='B'):
         self.klient_id = klient_id
         self.zkontroluj_a_oprav_db()
         self.opravit_strukturu_rozvrhu()
