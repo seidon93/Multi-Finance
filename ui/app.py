@@ -260,7 +260,7 @@ def zobrazit_header():
     st.sidebar.markdown("## 🗺️ Navigace")
     vyber = st.sidebar.radio(
         "Zvolte Modul:",
-        ("Dashboard", "Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty", "Uzávěrka"),
+        ( "Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty", "Uzávěrka", "Finanční dashboard"),
         label_visibility="collapsed"
     )
     return vyber
@@ -362,7 +362,7 @@ def formular_nova_transakce():
         st.markdown("<br>", unsafe_allow_html=True)
 
         # --- TLAČÍTKO ULOŽIT ---
-        if st.button("Uložit Transakci", type="primary", use_container_width=True):
+        if st.button("Uložit Transakci", type="primary", width='stretch'):
             if castka_bez_dph <= 0:
                 st.error("Zadejte částku.")
             elif not ucet_md_zaklad or not ucet_dal_zaklad:
@@ -415,41 +415,41 @@ def time_filter_ui():
 
         # 1. Řada: Dnes a Tento týden
         c1, c2 = st.columns(2)
-        if c1.button("Dnes", use_container_width=True):
+        if c1.button("Dnes", width='stretch'):
             set_dates(dnes, dnes);
             st.rerun()
-        if c2.button("Tento týden", use_container_width=True):
+        if c2.button("Tento týden", width='stretch'):
             start = dnes - timedelta(days=dnes.weekday())
             set_dates(start, start + timedelta(days=6));
             st.rerun()
 
         # 2. Řada: Tento měsíc a Tento rok
         c3, c4 = st.columns(2)
-        if c3.button("Tento měsíc", use_container_width=True):
+        if c3.button("Tento měsíc", width='stretch'):
             start_m = dnes.replace(day=1)
             next_m = dnes.replace(day=28) + timedelta(days=4)
             end_m = next_m - timedelta(days=next_m.day)
             set_dates(start_m, end_m);
             st.rerun()
-        if c4.button("Tento rok", use_container_width=True):
+        if c4.button("Tento rok", width='stretch'):
             set_dates(date(aktualni_rok, 1, 1), date(aktualni_rok, 12, 31));
             st.rerun()
 
         # 3. Řada: Q1 a Q2
         q1, q2 = st.columns(2)
-        if q1.button("Čtvrtletí (Q1)", use_container_width=True):
+        if q1.button("Čtvrtletí (Q1)", width='stretch'):
             set_dates(date(aktualni_rok, 1, 1), date(aktualni_rok, 3, 31));
             st.rerun()
-        if q2.button("Čtvrtletí (Q2)", use_container_width=True):
+        if q2.button("Čtvrtletí (Q2)", width='stretch'):
             set_dates(date(aktualni_rok, 4, 1), date(aktualni_rok, 6, 30));
             st.rerun()
 
         # 4. Řada: Q3 a Q4
         q3, q4 = st.columns(2)
-        if q3.button("Čtvrtletí (Q3)", use_container_width=True):
+        if q3.button("Čtvrtletí (Q3)", width='stretch'):
             set_dates(date(aktualni_rok, 7, 1), date(aktualni_rok, 9, 30));
             st.rerun()
-        if q4.button("Čtvrtletí (Q4)", use_container_width=True):
+        if q4.button("Čtvrtletí (Q4)", width='stretch'):
             set_dates(date(aktualni_rok, 10, 1), date(aktualni_rok, 12, 31));
             st.rerun()
 
@@ -463,7 +463,7 @@ def time_filter_ui():
         )
 
         # 6. Řada: Reset filtrů
-        if st.button("Reset filtrů", type="primary", use_container_width=True):
+        if st.button("Reset filtrů", type="primary", width='stretch'):
             set_dates(None, None);
             st.rerun()
 
@@ -532,7 +532,7 @@ def zobrazit_historii_uctu():
             ids_to_delete = edited_df[edited_df['Smazat'] == True]['ID'].tolist()
             if ids_to_delete:
                 if st.button(f"🗑️ Přesunout {len(ids_to_delete)} záznamů do koše", type="primary",
-                             use_container_width=True):
+                             width='stretch'):
                     for tid in ids_to_delete:
                         execute_query("UPDATE Transakce SET is_deleted = 1 WHERE id = ?", (tid,))
                     st.success("Záznamy byly přesunuty do koše.");
@@ -553,7 +553,7 @@ def zobrazit_historii_uctu():
                     with st.form(key=f"edit_form_final_{transakce_id}"):
                         st.markdown(f"**Editujete doklad:** `{detail['doklad']}`")
                         # (Ostatní pole formuláře zůstávají stejná...)
-                        if st.form_submit_button("💾 Uložit změny", type="primary", use_container_width=True):
+                        if st.form_submit_button("💾 Uložit změny", type="primary", width='stretch'):
                             # engine.upravit_transakci(...)
                             st.success("✅ Upraveno.");
                             time.sleep(0.5);
@@ -581,7 +581,7 @@ def zobrazit_historii_uctu():
 
             ids_to_restore = ed_del[ed_del['Obnovit'] == True]['ID'].tolist()
             if ids_to_restore:
-                if st.button("♻️ Nahrát zpět vybrané záznamy", key="restore_btn_active", use_container_width=True):
+                if st.button("♻️ Nahrát zpět vybrané záznamy", key="restore_btn_active", width='stretch'):
                     for tid in ids_to_restore:
                         execute_query("UPDATE Transakce SET is_deleted = 0 WHERE id = ?", (tid,))
                     st.success("Záznamy obnoveny.");
@@ -590,7 +590,7 @@ def zobrazit_historii_uctu():
 
             st.divider()
             if st.checkbox("Povolit definitivní odstranění z databáze", key="allow_hard_delete"):
-                if st.button("🔥 NAVŽDY VYMAZAT CELÝ KOŠ", type="primary", use_container_width=True):
+                if st.button("🔥 NAVŽDY VYMAZAT CELÝ KOŠ", type="primary", width='stretch'):
                     execute_query(
                         "DELETE FROM UcetniPohyby WHERE transakce_id IN (SELECT id FROM Transakce WHERE is_deleted = 1)",
                         ())
@@ -662,7 +662,7 @@ def zobrazit_historii_uctu():
             ids_to_delete = edited_df[edited_df['Smazat'] == True]['ID'].tolist()
             if ids_to_delete:
                 if st.button(f"🗑️ Přesunout {len(ids_to_delete)} záznamů do koše", type="primary",
-                             use_container_width=True):
+                             width='stretch'):
                     for tid in ids_to_delete:
                         execute_query("UPDATE Transakce SET is_deleted = 1 WHERE id = ?", (tid,))
                     st.success("Záznamy byly přesunuty do koše.");
@@ -683,7 +683,7 @@ def zobrazit_historii_uctu():
                     with st.form(key=f"edit_form_final_{transakce_id}"):
                         st.markdown(f"**Editujete doklad:** `{detail['doklad']}`")
                         # (Zde pokračují pole formuláře jako v předchozím kódu...)
-                        if st.form_submit_button("💾 Uložit změny", type="primary", use_container_width=True):
+                        if st.form_submit_button("💾 Uložit změny", type="primary", width='stretch'):
                             # engine.upravit_transakci(...)
                             st.success("✅ Upraveno.");
                             time.sleep(0.5);
@@ -1184,7 +1184,7 @@ def zobrazit_historii_uctu():
             ids_to_delete = edited_df[edited_df['Smazat'] == True]['ID'].tolist()
             if ids_to_delete:
                 if st.button(f"🗑️ Přesunout {len(ids_to_delete)} záznamů do koše", type="primary",
-                             use_container_width=True):
+                             width='stretch'):
                     for tid in ids_to_delete:
                         execute_query("UPDATE Transakce SET is_deleted = 1 WHERE id = ?", (tid,))
                     st.success("Záznamy byly přesunuty do koše.")
@@ -1242,7 +1242,7 @@ def zobrazit_historii_uctu():
                         new_smer = st.radio("Typ DPH", ['Neučtovat', 'DPH na VSTUPU (MD)', 'DPH na VÝSTUPU (D)'],
                                             horizontal=True, key=f"e_r_{transakce_id}")
 
-                        if st.form_submit_button("💾 Uložit změny", type="primary", use_container_width=True):
+                        if st.form_submit_button("💾 Uložit změny", type="primary", width='stretch'):
                             final_castka = parse_input_money(new_castka_raw)
                             try:
                                 engine.upravit_transakci(
@@ -1286,7 +1286,7 @@ def zobrazit_historii_uctu():
 
             ids_to_restore = ed_del[ed_del['Obnovit'] == True]['ID'].tolist()
             if ids_to_restore:
-                if st.button("♻️ Nahrát zpět vybrané záznamy", use_container_width=True, key="restore_btn_active"):
+                if st.button("♻️ Nahrát zpět vybrané záznamy", width='stretch', key="restore_btn_active"):
                     for tid in ids_to_restore:
                         execute_query("UPDATE Transakce SET is_deleted = 0 WHERE id = ?", (tid,))
                     st.success("Záznamy obnoveny.")
@@ -1295,7 +1295,7 @@ def zobrazit_historii_uctu():
 
             st.divider()
             if st.checkbox("Povolit definitivní odstranění z databáze", key="allow_hard_delete"):
-                if st.button("🔥 NAVŽDY VYMAZAT CELÝ KOŠ", type="primary", use_container_width=True):
+                if st.button("🔥 NAVŽDY VYMAZAT CELÝ KOŠ", type="primary", width='stretch'):
                     try:
                         execute_query("DELETE FROM UcetniPohyby WHERE transakce_id IN (SELECT id FROM Transakce WHERE is_deleted = 1)", ())
                         execute_query("DELETE FROM Transakce WHERE is_deleted = 1", ())
@@ -1386,7 +1386,7 @@ def zobrazit_uzaverku():
             </div>
         """, unsafe_allow_html=True)
 
-        if st.button("📝 Zaúčtovat daň (591 / 341)", type="primary", use_container_width=True):
+        if st.button("📝 Zaúčtovat daň (591 / 341)", type="primary", width='stretch'):
             if vypoctena_dan > 0:
                 res_id = engine.zauctovat_dan_z_prijmu(d_do, vypoctena_dan)
                 if res_id:
@@ -1403,7 +1403,7 @@ def zobrazit_uzaverku():
         rok_uzav = st.number_input("Rok k uzavření", value=dnes.year, step=1, key="rok_uzav_key")
         msg_placeholder = st.empty()
 
-        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary", use_container_width=True):
+        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary", width='stretch'):
             with st.spinner("Pracuji..."):
                 # Volání enginu
                 res = engine.provest_rocn_uzaverku_komplet(rok_uzav)
@@ -1426,7 +1426,7 @@ def zobrazit_uzaverku():
         st.subheader("Otevření nového roku (701)")
         rok_k_otevreni = st.number_input("Rok k otevření", value=dnes.year, step=1, key="rok_start_key")
         msg_open = st.empty()
-        if st.button("✨ Otevřít nový rok", use_container_width=True):
+        if st.button("✨ Otevřít nový rok", width='stretch'):
             res_open = engine.otevrit_novy_rok(rok_k_otevreni)
             if res_open and "✅" in res_open:
                 msg_open.success(res_open)
@@ -1441,7 +1441,7 @@ def zobrazit_uzaverku():
         col_lock, col_btn = st.columns([2, 1], vertical_alignment="bottom")
         d_lock = col_lock.date_input("Uzamknout k:", value=aktualni_uzaverka if aktualni_uzaverka else dnes)
 
-        if col_btn.button("🔒 Zamknout", use_container_width=True):
+        if col_btn.button("🔒 Zamknout", width='stretch'):
             engine.set_datum_uzaverky(d_lock)
             st.success(f"Účetnictví bylo uzamčeno k {d_lock.strftime('%d.%m.%Y')}.")
             st.rerun()
@@ -1454,12 +1454,12 @@ def zobrazit_uzaverku():
 
 
 def get_dashboard_data(self, d_od, d_do):
-    """Načte data pro dashboard včetně kontaktů z nové tabulky Subjekty."""
+    """Načte data pro Finanční dashboard. Automaticky vylučuje daně z příjmů a uzávěrky."""
     sql = """
         SELECT 
             T.datum as Datum,
-            COALESCE(S.nazev, 'Neznámý subjekt') as Subjekt,
-            COALESCE(S.email, '-') as Email,
+            COALESCE(S.nazev, T.popis) as Subjekt,
+            COALESCE(S.email, 'info@firma.cz') as Email,
             COALESCE(S.telefon, '-') as Telefon,
             CASE 
                 WHEN P.ucet LIKE '311%' THEN 'Pohledávka'
@@ -1471,32 +1471,38 @@ def get_dashboard_data(self, d_od, d_do):
         FROM Transakce T
         JOIN UcetniPohyby P ON T.id = P.transakce_id
         LEFT JOIN Subjekty S ON T.subjekt_id = S.id
-        WHERE T.klient_id = ? AND T.is_deleted = 0
+        WHERE T.klient_id = ? 
+        AND T.is_deleted = 0
+        -- VYLOUČENÍ VNITŘNÍCH ÚČETNÍCH OPERACÍ --
+        AND T.doklad_cislo NOT LIKE 'UZAV-%'  -- Vyloučí uzávěrky všech let
+        AND T.doklad_cislo NOT LIKE 'DPPO-%'  -- Vyloučí daň z příjmů
+        ------------------------------------------
         AND T.datum BETWEEN ? AND ?
         AND (P.ucet LIKE '311%' OR P.ucet LIKE '321%')
         ORDER BY T.datum DESC
     """
     try:
+        from core.database import execute_query
         return execute_query(sql, (self.klient_id, d_od, d_do))
     except Exception as e:
-        print(f"Chyba při načítání dashboardu: {e}")
+        print(f"Finanční dashboard data error: {e}")
         return []
 
 
 def zobrazit_financni_dashboard():
-    st.header("📊 Interaktivní Finanční Dashboard")
+    st.header("📊 Finanční Dashboard")
 
-    # 1. Klasické filtry (stabilní v session_state)
+    # 1. Klasické filtry (stabilní v session_state díky vašim předchozím opravám)
     d_od, d_do = time_filter_ui()
 
     if not d_od or not d_do:
-        st.info("Zvolte časové období ve filtrech pro zobrazení dat.")
+        st.info("Zvolte časové období ve filtrech pro zobrazení finančních dat.")
         return
 
-    # Načtení dat
+    # Načtení dat (očištěných o daně a uzávěrky)
     raw_data = engine.get_dashboard_data(d_od, d_do)
     if not raw_data:
-        st.warning("V tomto období nebyly nalezeny žádné relevantní pohledávky ani závazky.")
+        st.warning("V tomto období nejsou žádné reálné obchodní pohledávky ani závazky.")
         return
 
     df = pd.DataFrame([tuple(r) for r in raw_data],
@@ -1505,7 +1511,7 @@ def zobrazit_financni_dashboard():
 
     # 2. Interaktivní slicery (Posuvníky)
     with st.container(border=True):
-        st.subheader("⚙️ Upřesnit zobrazení (Slicery)")
+        st.subheader("⚙️ Upřesnit zobrazení")
         c1, c2, c3 = st.columns([1, 1, 1])
 
         with c1:
@@ -1515,7 +1521,7 @@ def zobrazit_financni_dashboard():
             max_c = float(df["Částka"].max())
             f_range = st.slider("Rozsah částky (Kč)", min_c, max_c, (min_c, max_c))
         with c3:
-            f_search = st.text_input("Hledat subjekt/popis", placeholder="Např. Faktura...")
+            f_search = st.text_input("Hledat subjekt/popis", placeholder="Např. Faktura...", key="dash_search_stable")
 
     # Filtrování DataFrame
     mask = (df["Typ"].isin(f_typ)) & \
@@ -1525,7 +1531,7 @@ def zobrazit_financni_dashboard():
 
     # 3. Metriky a Finanční bilance
     st.markdown("---")
-    m1, m2, m3 = st.columns(3)
+    m1, m2 = st.columns(2)
     pohl_sum = df_filtered[df_filtered["Typ"] == "Pohledávka"]["Částka"].sum()
     zav_sum = df_filtered[df_filtered["Typ"] == "Závazek"]["Částka"].sum()
     bilance = pohl_sum - zav_sum
@@ -1533,32 +1539,34 @@ def zobrazit_financni_dashboard():
     m1.metric("Pohledávky (Zelená)", f"{pohl_sum:,.2f} Kč".replace(",", " "))
     m2.metric("Závazky (Červená)", f"{zav_sum:,.2f} Kč".replace(",", " "))
 
-    # Bilance v modré barvě
+    # FINANČNÍ BILANCE V MODRÉ BARVĚ
     st.markdown(f"""
         <div style="background-color: rgba(0, 123, 255, 0.1); padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; text-align: center;">
-            <h5 style="margin:0; color: #007bff; opacity: 0.8;">AKTUÁLNÍ BILANCE (Modrá)</h5>
+            <h5 style="margin:0; color: #007bff; opacity: 0.8;">AKTUÁLNÍ FINANČNÍ BILANCE </h5>
             <h1 style="margin:0; color: #007bff; font-weight: bold;">{bilance:,.2f} Kč</h1>
         </div>
     """, unsafe_allow_html=True)
 
     # 4. Barevně formátovaná tabulka
-    st.subheader("📋 Detailní položky")
+    st.subheader("📋 Detailní položky dashboardu")
 
     def color_typ(row):
+        # Barevné kódování dle typu
         if row['Typ'] == 'Pohledávka':
-            return ['background-color: rgba(40, 167, 69, 0.1); color: #28a745; font-weight: bold'] * len(row)
+            return ['color: #28a745; font-weight: bold'] * len(row)
         elif row['Typ'] == 'Závazek':
-            return ['background-color: rgba(220, 53, 69, 0.1); color: #dc3545; font-weight: bold'] * len(row)
-        return ['color: #007bff'] * len(row)
+            return ['color: #dc3545; font-weight: bold'] * len(row)
+        else:
+            return ['color: #007bff; font-weight: bold'] * len(row)
 
     st.dataframe(
         df_filtered.style.apply(color_typ, axis=1),
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         column_config={
             "Částka": st.column_config.NumberColumn(format="%.2f Kč"),
             "Email": st.column_config.LinkColumn("Email"),
-            "Datum": st.column_config.DateColumn("Splatnost/Vystavení")
+            "Datum": st.column_config.DateColumn("Datum Splatnosti/Vystavení")
         }
     )
 
@@ -1566,9 +1574,8 @@ def zobrazit_financni_dashboard():
 if __name__ == "__main__":
     modul = zobrazit_header()
 
-    if modul == "Dashboard":
-        zobrazit_financni_dashboard()
-    elif modul == "Nová Transakce":
+
+    if modul == "Nová Transakce":
         formular_nova_transakce()
     elif modul == "Přehled Účtů":
         zobrazit_prehled_uctu()
@@ -1578,5 +1585,7 @@ if __name__ == "__main__":
         zobrazit_historii_uctu()
     elif modul == "Reporty":
         zobrazit_reporty()
+    elif modul == "Finanční dashboard":
+        zobrazit_financni_dashboard()
     elif modul == "Uzávěrka":
         zobrazit_uzaverku()
