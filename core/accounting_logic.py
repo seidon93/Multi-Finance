@@ -997,10 +997,6 @@ class AccountingEngine:
             return None
 
 
-    # ==========================================
-    # NOVÉ METODY PRO UZÁVĚRKU (VLOŽIT DO TŘÍDY)
-    # ==========================================
-
     def get_datum_uzaverky(self):
         res = execute_query("SELECT datum_uzaverky FROM Klienti WHERE id=?", (self.klient_id,))
         return res[0][0] if res else None
@@ -1025,9 +1021,6 @@ class AccountingEngine:
         if datum <= uzaverka:
             raise ValueError(f"⛔ Období je uzamčeno do {uzaverka.strftime('%d.%m.%Y')}.")
 
-    # ==========================================
-    # METODA PRO ROČNÍ UZÁVĚRKU (710)
-    # ==========================================
     def provest_uctovani_uzaverky_710(self, datum_uzaverky):
         return self.provest_rocn_uzaverku_komplet(datum_uzaverky.year)
 
@@ -1077,32 +1070,112 @@ class AccountingEngine:
         return self.provest_rocn_uzaverku_komplet(datum_uzaverky.year)
 
     def provest_rocn_uzaverku_komplet(self, rok):
+        """Uzavře 5xx/6xx -> 710 a Rozvahu -> 702 s ošetřením NameError."""
         datum_uzaverky = date(rok, 12, 31)
         datum_od = date(rok, 1, 1)
 
-        check = execute_query("SELECT id FROM Transakce WHERE doklad_cislo = ? AND klient_id = ? AND is_deleted = 0",
-                              (f"UZAV-{rok}", self.klient_id))
-        if check: return "⚠️ Uzávěrka pro tento rok již existuje."
+        # Inicializace proměnných, aby vždy existovaly
+        rows_710 = []
+        rows_702 = []
 
-        sql_710 = """
-            SELECT P.ucet, SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END)
-            FROM UcetniPohyby P JOIN Transakce T ON P.transakce_id = T.id
-            WHERE T.klient_id = ? AND T.datum >= ? AND T.datum <= ? AND T.is_deleted = 0
-            AND (P.ucet LIKE '5%' OR P.ucet LIKE '6%')
-            GROUP BY P.ucet HAVING abs(SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END)) > 0.005
-        """
-        rows_710 = execute_query(sql_710, (self.klient_id, datum_od, datum_uzaverky))
+        try:
+            # 1. Kontrola existující uzávěrky
+            check = execute_query(
+                "SELECT id, is_deleted FROM Transakce WHERE doklad_cislo = ? AND klient_id = ?",
+                (f"UZAV-{rok}", self.klient_id)
+            )
 
-        sql_702 = """
-            SELECT P.ucet, SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END)
-            FROM UcetniPohyby P JOIN Transakce T ON P.transakce_id = T.id
-            WHERE T.klient_id = ? AND T.datum <= ? AND T.is_deleted = 0
-            AND (P.ucet LIKE '[0-49]%')
-            GROUP BY P.ucet HAVING abs(SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END)) > 0.005
-        """
-        rows_702 = execute_query(sql_702, (self.klient_id, datum_uzaverky))
+            if check:
+                is_del = check[0][1]
+                if is_del:
+                    return f"⚠️ Uzávěrka pro rok {rok} již existuje v KOŠI. Musíte ji v Historii trvale smazat, než ji spustíte znovu."
+                else:
+                    return f"⚠️ Uzávěrka pro rok {rok} již existuje jako aktivní transakce."
 
-        # ... zbytek kódu metody pro zápis do DB (identický s vaší verzí) ...
+            # 2. Načtení zůstatků pro 710 (Výsledovka - náklady a výnosy)
+            sql_710 = """
+                SELECT P.ucet, SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END)
+                FROM UcetniPohyby P JOIN Transakce T ON P.transakce_id = T.id
+                WHERE T.klient_id = ? AND T.datum >= ? AND T.datum <= ? AND T.is_deleted = 0
+                AND (P.ucet LIKE '5%' OR P.ucet LIKE '6%')
+                GROUP BY P.ucet 
+                HAVING ABS(SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END)) > 0.005
+            """
+            rows_710 = execute_query(sql_710, (self.klient_id, datum_od, datum_uzaverky)) or []
+
+            # 3. Načtení zůstatků pro 702 (Rozvaha - majetek a závazky)
+            sql_702 = """
+                SELECT P.ucet, SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END)
+                FROM UcetniPohyby P JOIN Transakce T ON P.transakce_id = T.id
+                WHERE T.klient_id = ? AND T.datum <= ? AND T.is_deleted = 0
+                AND (P.ucet LIKE '[0-49]%')
+                GROUP BY P.ucet 
+                HAVING ABS(SUM(CASE WHEN P.smer='MD' THEN P.castka ELSE -P.castka END)) > 0.005
+            """
+            rows_702 = execute_query(sql_702, (self.klient_id, datum_uzaverky)) or []
+
+            # 4. Kontrola, zda je co zavírat
+            if not rows_710 and not rows_702:
+                return "⚠️ Žádná data k uzavření (všechny účty mají nulový zůstatek nebo neexistují transakce)."
+
+            # 5. Samotný proces zápisu do databáze
+            self.zajisti_existenci_uctu("710", "Účet zisků a ztrát")
+            self.zajisti_existenci_uctu("702", "Konečný účet rozvažný")
+
+            with Database() as conn:
+                cursor = conn.cursor()
+
+                # Vytvoření hlavičky uzávěrky
+                cursor.execute("""
+                    INSERT INTO Transakce (klient_id, datum, popis, doklad_cislo, created_at, is_deleted)
+                    VALUES (?, ?, ?, ?, GETDATE(), 0);
+                    SELECT SCOPE_IDENTITY();
+                """, (self.klient_id, datum_uzaverky, f"Uzávěrka roku {rok}", f"UZAV-{rok}"))
+
+                res_id = cursor.fetchone()
+                if not res_id:
+                    return "❌ Nepodařilo se vytvořit hlavičku transakce."
+                transakce_id = int(res_id[0])
+
+                sql_ins = "INSERT INTO UcetniPohyby (transakce_id, klient_id, ucet, smer, castka) VALUES (?, ?, ?, ?, ?)"
+                hv = 0.0
+
+                # Zápis pohybů pro 710 (převod výsledovky)
+                for r in rows_710:
+                    ucet, bilance = r[0], float(r[1])
+                    if bilance > 0:  # Náklad (MD) -> musíme dát na D
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, ucet, 'D', abs(bilance)))
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, '710', 'MD', abs(bilance)))
+                        hv -= abs(bilance)
+                    else:  # Výnos (D) -> musíme dát na MD
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, ucet, 'MD', abs(bilance)))
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, '710', 'D', abs(bilance)))
+                        hv += abs(bilance)
+
+                # Zápis pohybů pro 702 (převod rozvahy)
+                for r in rows_702:
+                    ucet, bilance = r[0], float(r[1])
+                    if bilance > 0:  # Aktivum (MD) -> na D
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, ucet, 'D', abs(bilance)))
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, '702', 'MD', abs(bilance)))
+                    else:  # Pasivum (D) -> na MD
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, ucet, 'MD', abs(bilance)))
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, '702', 'D', abs(bilance)))
+
+                # Převod konečného HV (710 -> 702)
+                if abs(hv) > 0.005:
+                    if hv > 0:  # Zisk
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, '710', 'MD', abs(hv)))
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, '702', 'D', abs(hv)))
+                    else:  # Ztráta
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, '710', 'D', abs(hv)))
+                        cursor.execute(sql_ins, (transakce_id, self.klient_id, '702', 'MD', abs(hv)))
+
+                conn.commit()
+                return f"✅ Rok {rok} úspěšně uzavřen! Doklad UZAV-{rok}."
+
+        except Exception as e:
+            return f"❌ Chyba při uzávěrce: {str(e)}"
 
     def otevrit_novy_rok(self, stary_rok):
         nr = stary_rok + 1;

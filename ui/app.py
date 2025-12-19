@@ -847,7 +847,7 @@ def zobrazit_historii_uctu():
         """
         params = [KLIENT_ID]
 
-        # Aplikace filtrů s pamětí (díky st.session_state v time_filter_ui)
+        # Aplikace filtrů s pamětí (využívá st.session_state v time_filter_ui)
         if metoda == "📅 Podle data transakce":
             date_from, date_to = time_filter_ui()
             if date_from and date_to:
@@ -867,7 +867,11 @@ def zobrazit_historii_uctu():
 
         sql_base += " GROUP BY T.id, T.datum, T.doklad_cislo, T.popis ORDER BY T.datum DESC, T.id DESC"
 
-        rows = execute_query(sql_base, tuple(params))
+        try:
+            rows = execute_query(sql_base, tuple(params))
+        except Exception as e:
+            st.error(f"Chyba při načítání dat: {e}")
+            rows = []
 
         if rows:
             st.write("### Nalezené záznamy")
@@ -875,7 +879,7 @@ def zobrazit_historii_uctu():
             df['Datum'] = pd.to_datetime(df['Datum']).dt.date
             df['Smazat'] = False
 
-            # Tabulka pro hromadné mazání
+            # Tabulka pro hromadné označení k přesunu do koše
             edited_df = st.data_editor(
                 df,
                 width="stretch",
@@ -884,7 +888,7 @@ def zobrazit_historii_uctu():
                 column_config={"Smazat": st.column_config.CheckboxColumn("Smazat?", default=False)}
             )
 
-            # Logika přesunu do koše
+            # Logika "Soft Delete" (přesun do koše)
             ids_to_delete = edited_df[edited_df['Smazat'] == True]['ID'].tolist()
             if ids_to_delete:
                 if st.button(f"🗑️ Přesunout {len(ids_to_delete)} záznamů do koše", type="primary",
@@ -900,7 +904,6 @@ def zobrazit_historii_uctu():
             # --- SEKCE EDITACE ---
             st.subheader("✏️ Upravit vybranou transakci")
 
-            # Vytvoření seznamu pro selectbox z aktuálně vyfiltrovaných dat
             transakce_map = {f"{r[2]} | {r[1]} | {r[3]} (ID: {r[0]})": r[0] for r in rows}
             vybrana_str = st.selectbox("Vyberte transakci k úpravě:", options=list(transakce_map.keys()),
                                        key="edit_select_active")
@@ -910,8 +913,6 @@ def zobrazit_historii_uctu():
                 detail = engine.get_transakce_detail(transakce_id)
 
                 if detail:
-                    # Používáme st.container místo st.form, pokud chceme dynamické prvky,
-                    # nebo st.form s unikátním klíčem pro stabilitu
                     with st.form(key=f"edit_form_final_{transakce_id}"):
                         st.markdown(f"**Editujete doklad:** `{detail['doklad']}`")
 
@@ -939,7 +940,6 @@ def zobrazit_historii_uctu():
                             sel_d = st.selectbox("Účet D", ucty_d, key="e_d_u_act")
                             ucet_dal_fin = sel_d.split(" - ")[0]
 
-                        # Částka a DPH
                         odhad_castka = max([p['castka'] for p in detail['pohyby']]) if detail['pohyby'] else 0.0
                         c_m, c_d = st.columns(2)
                         new_castka_raw = c_m.text_input("Částka bez DPH", value=str(odhad_castka))
@@ -969,7 +969,7 @@ def zobrazit_historii_uctu():
                             except Exception as e:
                                 st.error(f"Chyba při ukládání: {e}")
         else:
-            st.info("Žádné záznamy neodpovídají filtrům.")
+            st.info("Žádné aktivní transakce neodpovídají filtrům.")
 
     # --- TAB 2: KOŠ (SMAZANÉ) ---
     with tab2:
@@ -995,11 +995,30 @@ def zobrazit_historii_uctu():
                 if st.button("♻️ Nahrát zpět vybrané záznamy", use_container_width=True, key="restore_btn_active"):
                     for tid in ids_to_restore:
                         execute_query("UPDATE Transakce SET is_deleted = 0 WHERE id = ?", (tid,))
-                    st.success("Záznamy byly úspěšně obnoveny.")
+                    st.success("Záznamy obnoveny.")
                     time.sleep(0.5)
                     st.rerun()
+
+            st.divider()
+            # MOŽNOST DEFINITIVNÍHO SMAZÁNÍ - OPRAVENÉ POŘADÍ
+            if st.checkbox("Povolit definitivní odstranění z databáze", key="allow_hard_delete"):
+                if st.button("🔥 NAVŽDY VYMAZAT CELÝ KOŠ", type="primary", use_container_width=True):
+                    try:
+                        # 1. Nejdříve smažeme pohyby (děti)
+                        execute_query(
+                            "DELETE FROM UcetniPohyby WHERE transakce_id IN (SELECT id FROM Transakce WHERE is_deleted = 1)",
+                            ())
+                        # 2. Poté smažeme transakce (rodiče)
+                        execute_query("DELETE FROM Transakce WHERE is_deleted = 1", ())
+
+                        st.error("Koš byl kompletně vyprázdněn.")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Chyba při fyzickém mazání: {e}")
         else:
             st.info("Koš je prázdný.")
+
 
 def zobrazit_uzaverku():
     st.header("🔒 Správa Účetních Období & Roční Závěrka")
@@ -1037,141 +1056,113 @@ def zobrazit_uzaverku():
         d_do = date(vybrany_rok, 12, 31)
         report_data = engine.get_report_data(d_od, d_do)
 
-        hv_ucetni = report_data.get('hospodarsky_vysledek', 0.0)
-
-        # Aby se nám zisk neměnil pod rukama po zaúčtování daně,
-        # musíme k němu přičíst zpět náklady na účtech 59x (pokud už tam nějaké jsou).
-        naklady_dan = sum(pol['castka'] for pol in report_data['naklady'] if str(pol['ucet']).startswith('59'))
-
-        # HRUBÝ ZISK (EBT) = Účetní HV + Náklady na daň
-        hruby_zisk_ebt = hv_ucetni + naklady_dan
-
-        # --- BANNER PRO HRUBÝ ZISK ---
-        if hruby_zisk_ebt >= 0:
-            barva_text = "#28a745"  # Zelená
-            barva_bg = "rgba(40, 167, 69, 0.15)"
-            popisek = "Hrubý zisk (před zdaněním)"
-            ikona = "📈"
+        if report_data:
+            hv_ucetni = report_data.get('hospodarsky_vysledek', 0.0)
+            # Přičtení případných nákladů na daň zpět k HV
+            naklady_dan = sum(pol['castka'] for pol in report_data['naklady'] if str(pol['ucet']).startswith('59'))
+            hruby_zisk_ebt = hv_ucetni + naklady_dan
         else:
-            barva_text = "#dc3545"  # Červená
-            barva_bg = "rgba(220, 53, 69, 0.15)"
-            popisek = "Hrubá ztráta (před zdaněním)"
-            ikona = "📉"
+            hruby_zisk_ebt = 0.0
+
+        # Banner pro hrubý zisk
+        if hruby_zisk_ebt >= 0:
+            barva_text, barva_bg, popisek, ikona = "#28a745", "rgba(40, 167, 69, 0.15)", "Hrubý zisk", "📈"
+        else:
+            barva_text, barva_bg, popisek, ikona = "#dc3545", "rgba(220, 53, 69, 0.15)", "Hrubá ztráta", "📉"
 
         st.markdown(f"""
             <div style="background-color: {barva_bg}; padding: 15px; border-radius: 10px; border: 2px solid {barva_text}; text-align: center; margin-bottom: 25px;">
-                <h4 style="margin:0; color: {barva_text}; opacity: 0.9;">{ikona} {popisek}</h4>
+                <h4 style="margin:0; color: {barva_text}; opacity: 0.9;">{ikona} {popisek} (před zdaněním)</h4>
                 <h1 style="margin:0; color: {barva_text}; font-size: 3em; font-weight: bold;">{hruby_zisk_ebt:,.2f} Kč</h1>
             </div>
         """, unsafe_allow_html=True)
 
         st.markdown("### Stanovení daňové povinnosti")
-
-        # 3. Formulář
         c1, c_space, c2 = st.columns([2, 0.2, 1])
-
-        # A) Základ daně (Defaultně EBT, ale lze změnit)
-        default_zaklad = max(0.0, hruby_zisk_ebt)
-
         with c1:
-            zaklad_dane = st.number_input("Základ daně (Kč)", value=default_zaklad, step=1000.0,
-                                          help="Upravený základ daně.")
-
-        # B) Sazba (vpravo)
+            zaklad_dane = st.number_input("Základ daně (Kč)", value=max(0.0, hruby_zisk_ebt), step=1000.0)
         with c2:
             sazba_dane = st.number_input("Sazba daně (%)", value=21.0, step=1.0, format="%.1f")
 
-        # 4. Výpočet
         vypoctena_dan = zaklad_dane * (sazba_dane / 100.0)
 
-        # 5. VÝSLEDEK (Barevně rozlišený)
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        if vypoctena_dan > 0:
-            res_color = "#dc3545"  # Červená
-            res_bg = "rgba(220, 53, 69, 0.1)"
-            res_text = "SPLATNÉ (K ÚHRADĚ)"
-        else:
-            res_color = "#28a745"  # Zelená
-            res_bg = "rgba(40, 167, 69, 0.1)"
-            res_text = "BEZ POVINNOSTI"
+        # Výsledek výpočtu
+        res_color = "#dc3545" if vypoctena_dan > 0 else "#28a745"
+        res_text = "SPLATNÉ (K ÚHRADĚ)" if vypoctena_dan > 0 else "BEZ POVINNOSTI"
 
         st.markdown(f"""
-            <div style="text-align: center; background-color: {res_bg}; padding: 10px 15px; border-radius: 8px; border: 1px solid {res_color}; margin-bottom: 20px;">
-                <h5 style="margin:0; color: #888; font-weight: normal;">Daňová povinnost k úhradě</h5>
+            <div style="text-align: center; background-color: rgba(0,0,0,0.2); padding: 10px 15px; border-radius: 8px; border: 1px solid {res_color}; margin-bottom: 20px;">
+                <h5 style="margin:0; color: #888;">Daňová povinnost k úhradě</h5>
                 <h1 style="margin: 5px 0; color: {res_color}; font-size: 2.4em;">{vypoctena_dan:,.2f} Kč</h1>
-                <div style="color: {res_color}; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9em;">{res_text}</div>
+                <div style="color: {res_color}; font-weight: bold; text-transform: uppercase;">{res_text}</div>
             </div>
         """, unsafe_allow_html=True)
 
-        # 6. Tlačítko
-        if st.button("📝 Zaúčtovat daň (591 / 341)", type="primary", width="stretch"):
+        if st.button("📝 Zaúčtovat daň (591 / 341)", type="primary", use_container_width=True):
             if vypoctena_dan > 0:
                 res_id = engine.zauctovat_dan_z_prijmu(d_do, vypoctena_dan)
                 if res_id:
-                    st.success(f"✅ Daň {vypoctena_dan:,.2f} Kč byla zaúčtována! (Doklad DPPO-{vybrany_rok})")
+                    st.success(f"✅ Daň {vypoctena_dan:,.2f} Kč byla zaúčtována!")
                     st.balloons()
-                    # Počkáme chvilku a reloadneme, aby se aktualizovala data v grafu (pokud tam nějaký je)
             else:
                 st.warning("Daň je nulová nebo záporná.")
 
-    # ... (zbytek funkcí pro 702, 701 a Zámek nechte beze změn) ...
+    # =========================================================
+    # TAB 2: ROČNÍ ZÁVĚRKA (OPRAVENO PROTI NoneType)
+    # =========================================================
     with tabs[1]:
         st.subheader("Konečná roční závěrka (702)")
-        # ... (zbytek kódu z minula) ...
         rok_uzav = st.number_input("Rok k uzavření", value=dnes.year, step=1, key="rok_uzav_key")
         msg_placeholder = st.empty()
-        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary", width="stretch"):
-            with st.spinner("Pracuji..."):
-                res = engine.provest_rocn_uzaverku_komplet(rok_uzav)
-            if "✅" in res:
-                msg_placeholder.success(res);
-                st.balloons()
-            else:
-                msg_placeholder.error(res)
 
+        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary", use_container_width=True):
+            with st.spinner("Pracuji..."):
+                # Volání enginu
+                res = engine.provest_rocn_uzaverku_komplet(rok_uzav)
+
+            # Bezpečná kontrola výsledku
+            if res and isinstance(res, str) and "✅" in res:
+                msg_placeholder.success(res)
+                st.balloons()
+            elif res and isinstance(res, str):
+                msg_placeholder.error(res)
+            else:
+                # Ošetření případu, kdy engine vrátí None
+                msg_placeholder.warning(
+                    "⚠️ Uzávěrka nebyla provedena. Engine nevrátil žádná data (pravděpodobně nulové zůstatky).")
+
+    # =========================================================
+    # TAB 3: OTEVŘENÍ ROKU
+    # =========================================================
     with tabs[2]:
         st.subheader("Otevření nového roku (701)")
-        rok_start = st.number_input("Minulý rok", value=dnes.year, step=1, key="rok_start_key")
+        rok_start = st.number_input("Minulý rok", value=dnes.year - 1, step=1, key="rok_start_key")
         msg_open = st.empty()
-        if st.button("✨ Otevřít nový rok", width="stretch"):
-            res = engine.otevrit_novy_rok(rok_start)
-            if "✅" in res:
-                msg_open.success(res)
+        if st.button("✨ Otevřít nový rok", use_container_width=True):
+            res_open = engine.otevrit_novy_rok(rok_start)
+            if res_open and "✅" in res_open:
+                msg_open.success(res_open)
             else:
-                msg_open.error(res)
+                msg_open.error(res_open if res_open else "Chyba při otevírání roku.")
 
+    # =========================================================
+    # TAB 4: UZAMYKÁNÍ DATA
+    # =========================================================
     with tabs[3]:
         st.subheader("Uzamčení data")
         col_lock, col_btn = st.columns([2, 1], vertical_alignment="bottom")
-        d_lock = col_lock.date_input("Uzamknout k:", value=dnes)
-        if col_btn.button("🔒 Zamknout", width="stretch"):
+        d_lock = col_lock.date_input("Uzamknout k:", value=aktualni_uzaverka if aktualni_uzaverka else dnes)
+
+        if col_btn.button("🔒 Zamknout", use_container_width=True):
             engine.set_datum_uzaverky(d_lock)
-            st.success("Uzamčeno.")
+            st.success(f"Účetnictví bylo uzamčeno k {d_lock.strftime('%d.%m.%Y')}.")
             st.rerun()
+
         st.divider()
-        if st.button("🔓 Odemknout", type="secondary"):
+        if st.button("🔓 Odemknout účetnictví", type="secondary"):
             engine.set_datum_uzaverky(None)
+            st.success("Účetnictví bylo kompletně odemčeno.")
             st.rerun()
-
-    with tabs[3]:  # Předpokládáme, že přidáte nový tab nebo rozšíříte stávající
-        st.subheader("📦 Roční úprava zásob (Metoda B)")
-        if st.session_state.metoda_zasob == 'A':
-            st.info("Při metodě A probíhá účtování zásob průběžně. Zde nejsou vyžadovány žádné kroky.")
-        else:
-            with st.form("form_zasoby_b"):
-                rok_zas = st.number_input("Rok", value=date.today().year, step=1)
-                stav_mat = st.number_input("Konečný stav materiálu (112) dle inventury", min_value=0.0)
-                stav_zbo = st.number_input("Konečný stav zboží (132) dle inventury", min_value=0.0)
-
-                if st.form_submit_button("💾 Zaúčtovat stavy zásob"):
-                    try:
-                        res1 = engine.provest_operaci_zasoby_uzaverka(rok_zas, stav_mat, 'material')
-                        res2 = engine.provest_operaci_zasoby_uzaverka(rok_zas, stav_zbo, 'zbozi')
-                        if res1 and res2:
-                            st.success("✅ Zásoby byly úspěšně přeceněny dle inventury.")
-                    except Exception as e:
-                        st.error(f"Chyba: {e}")
 
 
 # --- Hlavní spouštěcí smyčka Streamlit ---
