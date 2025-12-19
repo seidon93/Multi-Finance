@@ -26,7 +26,6 @@ KLIENT_ID = 1
 if 'metoda_zasob' not in st.session_state:
     st.session_state.metoda_zasob = 'B'
 
-
 # Inicializace účetního enginu (globálně)
 engine = AccountingEngine(klient_id=KLIENT_ID)
 metoda_zasob = st.session_state.metoda_zasob
@@ -147,14 +146,14 @@ st.markdown(
         .main-header-container { margin-top: 0; text-align: center; }
         .main-header-title { font-size: 1.6rem !important; }
     }
-    
- 
+
+
     /* Úprava pro filtry - návrat k 2 sloupcům a standardním mezerám */
     .filter-grid [data-testid="stHorizontalBlock"] {
         gap: 1.5rem !important; /* Širší mezera mezi dvěma sloupci */
         margin-bottom: 0.5rem;
     }
-    
+
     .filter-grid button {
         height: 45px !important; /* Vyšší tlačítka jako na obrázku */
         font-weight: 500;
@@ -185,7 +184,7 @@ st.markdown(
     .restore-btn button:hover {
         background-color: rgba(40, 167, 69, 0.1) !important;
     }
-    
+
     /* Červené řádky pro smazané záznamy v tabulce */
     .deleted-row {
         color: #888 !important;
@@ -260,8 +259,8 @@ def zobrazit_header():
     st.sidebar.markdown("## 🗺️ Navigace")
     vyber = st.sidebar.radio(
         "Zvolte Modul:",
-        ( "Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty", "Uzávěrka", "Finanční dashboard"),
-        label_visibility="collapsed",key="hlavni_navigace"
+        ("Finanční Dashboard", "Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty", "Uzávěrka"),
+        label_visibility="collapsed", key="main_navigation_stable"
     )
     return vyber
 
@@ -1235,10 +1234,12 @@ def zobrazit_historii_uctu():
 
                         odhad_castka = max([p['castka'] for p in detail['pohyby']]) if detail['pohyby'] else 0.0
                         c_m, c_d = st.columns(2)
-                        new_castka_raw = c_m.text_input("Částka bez DPH", value=str(odhad_castka), key=f"e_m_{transakce_id}")
+                        new_castka_raw = c_m.text_input("Částka bez DPH", value=str(odhad_castka),
+                                                        key=f"e_m_{transakce_id}")
 
                         dph_sazby = engine.get_dph_sazby()
-                        new_sazba = c_d.selectbox("Sazba DPH %", sorted(list(dph_sazby.keys()), reverse=True), key=f"e_s_{transakce_id}")
+                        new_sazba = c_d.selectbox("Sazba DPH %", sorted(list(dph_sazby.keys()), reverse=True),
+                                                  key=f"e_s_{transakce_id}")
                         new_smer = st.radio("Typ DPH", ['Neučtovat', 'DPH na VSTUPU (MD)', 'DPH na VÝSTUPU (D)'],
                                             horizontal=True, key=f"e_r_{transakce_id}")
 
@@ -1282,7 +1283,8 @@ def zobrazit_historii_uctu():
             df_del = pd.DataFrame([tuple(r) for r in del_rows], columns=["ID", "Datum", "Doklad", "Popis", "Objem"])
             df_del['Obnovit'] = False
             ed_del = st.data_editor(df_del, width="stretch", hide_index=True, key="trash_editor_interactive",
-                                    column_config={"Obnovit": st.column_config.CheckboxColumn("Obnovit?", default=False)})
+                                    column_config={
+                                        "Obnovit": st.column_config.CheckboxColumn("Obnovit?", default=False)})
 
             ids_to_restore = ed_del[ed_del['Obnovit'] == True]['ID'].tolist()
             if ids_to_restore:
@@ -1297,7 +1299,9 @@ def zobrazit_historii_uctu():
             if st.checkbox("Povolit definitivní odstranění z databáze", key="allow_hard_delete"):
                 if st.button("🔥 NAVŽDY VYMAZAT CELÝ KOŠ", type="primary", width='stretch'):
                     try:
-                        execute_query("DELETE FROM UcetniPohyby WHERE transakce_id IN (SELECT id FROM Transakce WHERE is_deleted = 1)", ())
+                        execute_query(
+                            "DELETE FROM UcetniPohyby WHERE transakce_id IN (SELECT id FROM Transakce WHERE is_deleted = 1)",
+                            ())
                         execute_query("DELETE FROM Transakce WHERE is_deleted = 1", ())
                         st.error("Koš byl kompletně vyprázdněn.")
                         time.sleep(1)
@@ -1454,54 +1458,46 @@ def zobrazit_uzaverku():
 
 
 def zobrazit_financni_dashboard():
-    # POJISTKA PROTI RESETU: Uložíme informaci o modulu do paměti session_state
-    st.session_state['current_module'] = "Finanční Dashboard"
-
     st.header("📊 Finanční Dashboard")
 
-    # 1. Klasické časové filtry (zůstávají nahoře stabilní)
+    # 1. Klasické filtry (stabilní v session_state)
     d_od, d_do = time_filter_ui()
 
     if not d_od or not d_do:
         st.info("Zvolte časové období ve filtrech pro zobrazení finančních dat.")
         return
 
-    # Načtení očištěných dat z SQL
+    # Načtení dat přes novou metodu v enginu
     raw_data = engine.get_dashboard_data(d_od, d_do)
+
     if not raw_data:
-        st.warning("V tomto období nejsou žádné reálné obchodní pohledávky ani závazky.")
+        st.warning("V tomto období nejsou žádné reálné obchodní pohledávky ani závazky (mimo uzávěrky).")
         return
 
     df = pd.DataFrame([tuple(r) for r in raw_data],
                       columns=["Datum", "Subjekt", "Email", "Telefon", "Typ", "Částka", "Popis"])
     df['Datum'] = pd.to_datetime(df['Datum']).dt.date
 
-    # 2. Interaktivní slicery s UNIKÁTNÍMI KLÍČI (zabrání uskakován stránky)
+    # 2. Interaktivní slicery s UNIKÁTNÍMI KLÍČI (zabrání resetu na filtry)
     with st.container(border=True):
         st.subheader("⚙️ Upřesnit zobrazení")
         c1, c2, c3 = st.columns([1, 1, 1])
 
         with c1:
-            f_typ = st.multiselect("Filtrovat Typ",
-                                   options=df["Typ"].unique(),
-                                   default=df["Typ"].unique(),
-                                   key="dash_ms_type_stable")
+            f_typ = st.multiselect("Filtrovat Typ", options=df["Typ"].unique(),
+                                   default=df["Typ"].unique(), key="dash_ms_type_stable")
         with c2:
             min_c = float(df["Částka"].min())
             max_c = float(df["Částka"].max())
-            f_range = st.slider("Rozsah částky (Kč)",
-                                min_c, max_c, (min_c, max_c),
-                                key="dash_slider_stable")  # <--- TENTO KLÍČ DRŽÍ POZICI
+            # KEY dash_slider_amount zabrání návratu nahoru
+            f_range = st.slider("Rozsah částky (Kč)", min_c, max_c, (min_c, max_c), key="dash_slider_amount")
         with c3:
-            f_search = st.text_input("Hledat subjekt/popis",
-                                     placeholder="Např. Faktura...",
-                                     key="dash_search_stable")
+            f_search = st.text_input("Hledat subjekt/popis", placeholder="Např. Faktura...", key="dash_search_stable")
 
-    # Filtrace přes masku na základě slicerů
+    # --- LOGIKA FILTROVÁNÍ (MASK) ---
     mask = (df["Typ"].isin(f_typ)) & \
            (df["Částka"].between(f_range[0], f_range[1])) & \
            (df["Subjekt"].str.contains(f_search, case=False) | df["Popis"].str.contains(f_search, case=False))
-
     df_filtered = df[mask].copy()
 
     # 3. Metriky a Finanční bilance
@@ -1514,7 +1510,7 @@ def zobrazit_financni_dashboard():
     m1.metric("Pohledávky (Zelená)", f"{pohl_sum:,.2f} Kč".replace(",", " "))
     m2.metric("Závazky (Červená)", f"{zav_sum:,.2f} Kč".replace(",", " "))
 
-    # FINANČNÍ BILANCE V MODRÉ BARVĚ
+    # Banner bilance v modré
     st.markdown(f"""
         <div style="background-color: rgba(0, 123, 255, 0.1); padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; text-align: center;">
             <h5 style="margin:0; color: #007bff; opacity: 0.8;">AKTUÁLNÍ FINANČNÍ BILANCE </h5>
@@ -1530,12 +1526,11 @@ def zobrazit_financni_dashboard():
             return ['color: #28a745; font-weight: bold'] * len(row)
         elif row['Typ'] == 'Závazek':
             return ['color: #dc3545; font-weight: bold'] * len(row)
-        else:
-            return ['color: #007bff; font-weight: bold'] * len(row)
+        return ['color: #007bff; font-weight: bold'] * len(row)
 
     st.dataframe(
         df_filtered.style.apply(color_typ, axis=1),
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         column_config={
             "Částka": st.column_config.NumberColumn(format="%.2f Kč"),
@@ -1544,12 +1539,14 @@ def zobrazit_financni_dashboard():
         }
     )
 
-# --- Hlavní spouštěcí smyčka Streamlit ---
+
+# 3. Rozcestník na konci souboru
 if __name__ == "__main__":
     modul = zobrazit_header()
 
-
-    if modul == "Nová Transakce":
+    if modul == "Finanční Dashboard":  # MUSÍ BÝT PŘESNĚ STEJNĚ JAKO V RADIO
+        zobrazit_financni_dashboard()
+    elif modul == "Nová Transakce":
         formular_nova_transakce()
     elif modul == "Přehled Účtů":
         zobrazit_prehled_uctu()
@@ -1559,7 +1556,5 @@ if __name__ == "__main__":
         zobrazit_historii_uctu()
     elif modul == "Reporty":
         zobrazit_reporty()
-    elif modul == "Finanční dashboard":
-        zobrazit_financni_dashboard()
     elif modul == "Uzávěrka":
         zobrazit_uzaverku()
