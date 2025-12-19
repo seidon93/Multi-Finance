@@ -186,15 +186,15 @@ class AccountingEngine:
         """
         Komplexní úprava transakce:
         1. Kontrola uzávěrek pro staré i nové datum.
-        2. Aktualizace hlavičky v tabulce Transakce včetně splatnosti.
-        3. Kompletní přepočet a znovuvytvoření účetních pohybů (přepis tabulky UcetniPohyby).
+        2. Aktualizace hlavičky v SQL (včetně splatnosti).
+        3. Kompletní přepis účetních pohybů.
         """
-        # 1. Kontrola starého stavu a uzávěrky
+        # 1. Načtení starého stavu pro kontrolu uzávěrky
         stary_stav = self.get_transakce_detail(transakce_id)
         if not stary_stav:
             raise ValueError("Transakce neexistuje.")
 
-        # Kontrola, zda nejsou období uzavřena
+        # Kontrola, zda nejsou období uzamčena
         self.zkontroluj_zda_je_otevreno(stary_stav['datum'])
         self.zkontroluj_zda_je_otevreno(nove_datum)
 
@@ -207,15 +207,11 @@ class AccountingEngine:
             if smer_dph_popis != 'Neučtovat' and float(sazba_dph) > 0.0:
                 tax = base * (float(sazba_dph) / 100)
                 sz = self.get_dph_sazby().get(float(sazba_dph))
-                if not sz:
-                    raise ValueError(f"Sazba DPH {sazba_dph}% nenalezena.")
-
                 if smer_dph_popis == 'DPH na VSTUPU (MD)':
                     u_dph, s_dph, u_opp, s_opp = sz['vstup'], 'MD', ucet_dal, 'D'
                 else:
                     u_dph, s_dph, u_opp, s_opp = sz['vystup'], 'D', ucet_md, 'MD'
             else:
-                # Bez DPH - určení směru protipoložky
                 if str(ucet_md).startswith(('5', '0', '1', '2', '3')):
                     u_opp, s_opp = ucet_dal, 'D'
                 else:
@@ -226,29 +222,30 @@ class AccountingEngine:
             with Database() as conn:
                 cursor = conn.cursor()
 
-                # 3. Update hlavičky (zápis nových hodnot do Transakce)
-                cursor.execute("""
+                # 3. UPDATE HLAVIČKY (Důležité: nove_datum_splatnosti je zde jako druhý parametr)
+                sql_upd = """
                     UPDATE Transakce 
                     SET datum = ?, datum_splatnosti = ?, popis = ?, doklad_cislo = ?
                     WHERE id = ? AND klient_id = ?
-                """, (nove_datum, nove_datum_splatnosti, novy_popis, novy_doklad, transakce_id, self.klient_id))
+                """
+                cursor.execute(sql_upd, (
+                nove_datum, nove_datum_splatnosti, novy_popis, novy_doklad, transakce_id, self.klient_id))
 
-                # 4. Smazání starých pohybů
+                # 4. Smazání a znovuvytvoření pohybů
                 cursor.execute("DELETE FROM UcetniPohyby WHERE transakce_id = ?", (transakce_id,))
 
-                # 5. Zápis nových pohybů
                 sql_pohyb = "INSERT INTO UcetniPohyby (transakce_id, klient_id, ucet, smer, castka) VALUES (?, ?, ?, ?, ?)"
 
-                # Pohyb A: Základ
+                # Základ
                 u_z = ucet_md if s_opp == 'D' else ucet_dal
                 s_z = 'MD' if s_opp == 'D' else 'D'
                 cursor.execute(sql_pohyb, (transakce_id, self.klient_id, u_z, s_z, base))
 
-                # Pohyb B: DPH (pokud existuje)
+                # DPH
                 if tax > 0 and u_dph:
                     cursor.execute(sql_pohyb, (transakce_id, self.klient_id, u_dph, s_dph, tax))
 
-                # Pohyb C: Protipoložka (celková částka)
+                # Celkem
                 cursor.execute(sql_pohyb, (transakce_id, self.klient_id, u_opp, s_opp, total))
 
                 conn.commit()
