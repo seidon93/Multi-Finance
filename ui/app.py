@@ -488,6 +488,7 @@ def zobrazit_historii_uctu():
     # Rozdělení na Aktivní záznamy a Koš pomocí záložek
     tab1, tab2 = st.tabs(["📋 Aktivní transakce", "🗑️ Koš (Smazané)"])
     from core.database import execute_query
+    import time
 
     # --- TAB 1: AKTIVNÍ ZÁZNAMY ---
     with tab1:
@@ -500,7 +501,7 @@ def zobrazit_historii_uctu():
             horizontal=True, key="search_method_active"
         )
 
-        # SQL Dotaz: Přidáno T.datum_splatnosti pro načítání z DB
+        # SQL Dotaz: Vrací 6 sloupců
         sql_base = """
             SELECT T.id, T.datum, T.datum_splatnosti, T.doklad_cislo, T.popis, SUM(P.castka) as Objem
             FROM Transakce T
@@ -529,7 +530,6 @@ def zobrazit_historii_uctu():
 
         if rows:
             st.write("### Nalezené záznamy")
-            # Definice DataFrame: 6 sloupců z SQL + 1 pro checkbox 'Smazat'
             df = pd.DataFrame([tuple(r) for r in rows],
                               columns=["ID", "Datum", "Splatnost", "Doklad", "Popis", "Objem"])
 
@@ -541,9 +541,9 @@ def zobrazit_historii_uctu():
                 df, width="stretch", hide_index=True, key="active_editor_interactive",
                 column_config={
                     "Smazat": st.column_config.CheckboxColumn("Smazat?", default=False),
-                    "Objem": st.column_config.NumberColumn("Objem (Kč)", format="%.2f"),  # Sjednocený formát
+                    "Objem": st.column_config.NumberColumn("Objem (Kč)", format="%.2f"),
                     "Datum": st.column_config.DateColumn("Vystaveno"),
-                    "Splatnost": st.column_config.DateColumn("Splatnost")  # Nový sloupec v tabulce
+                    "Splatnost": st.column_config.DateColumn("Splatnost")
                 }
             )
 
@@ -559,45 +559,55 @@ def zobrazit_historii_uctu():
 
             st.markdown("---")
             # --- SEKCE EDITACE ---
-            st.subheader("✏️ Upravit vybranou transakci")
-            transakce_map = {f"{r[3]} | {r[1]} | {r[4]} (ID: {r[0]})": r[0] for r in rows}
-            vybrana_str = st.selectbox("Vyberte transakci k úpravě:", options=list(transakce_map.keys()),
-                                       key="edit_select_active")
+            with st.container(border=True):
+                st.subheader("✏️ Upravit vybranou transakci")
+                # Výběr transakce k editaci
+                transakce_map = {f"{r[3]} | {r[1]} | {r[4]} (ID: {r[0]})": r[0] for r in rows}
+                vybrana_str = st.selectbox("Vyberte transakci k úpravě:", options=list(transakce_map.keys()),
+                                           key="edit_select_active")
 
-            if vybrana_str:
-                transakce_id = transakce_map[vybrana_str]
-                # Detail transakce musí v enginu vracet i datum_splatnosti
-                detail = engine.get_transakce_detail(transakce_id)
-                if detail:
-                    with st.form(key=f"edit_form_final_{transakce_id}"):
-                        st.markdown(f"**Editujete doklad:** `{detail['doklad']}`")
+                if vybrana_str:
+                    transakce_id = transakce_map[vybrana_str]
+                    detail = engine.get_transakce_detail(transakce_id)
 
-                        # Záhlaví editačního formuláře se třemi sloupci
-                        c_dok, c_dat, c_spl = st.columns([2, 1, 1])
-                        new_doklad = c_dok.text_input("Číslo Dokladu", value=detail['doklad'])
-                        new_datum = c_dat.date_input("Datum vystavení", value=detail['datum'])
+                    if detail:
+                        # Unikátní klíč pro formulář zabrání nechtěným rerunům při psaní
+                        with st.form(key=f"edit_form_final_{transakce_id}"):
+                            st.markdown(f"**Editujete doklad:** `{detail['doklad']}`")
 
-                        # PŘIDÁNO: Datum splatnosti do editace
-                        val_splatnost = detail.get('datum_splatnosti') if detail.get('datum_splatnosti') else new_datum
-                        new_splatnost = c_spl.date_input("Datum splatnosti", value=val_splatnost)
+                            c_dok, c_dat, c_spl = st.columns([2, 1, 1])
+                            new_doklad = c_dok.text_input("Číslo Dokladu", value=detail['doklad'])
+                            new_datum = c_dat.date_input("Datum vystavení", value=detail['datum'])
 
-                        new_popis = st.text_area("Popis", value=detail['popis'])
+                            # Ošetření splatnosti
+                            curr_splat = detail.get('datum_splatnosti')
+                            if not curr_splat: curr_splat = new_datum
+                            new_splatnost = c_spl.date_input("Splatnost", value=curr_splat)
 
-                        # Zobrazení částky sjednoceným formátem
-                        st.write(f"Celkový objem transakce: **{format_money(detail['objem'])}**")
+                            new_popis = st.text_area("Popis", value=detail['popis'])
 
-                        if st.form_submit_button("💾 Uložit změny", type="primary", use_container_width=True):
-                            # Tady voláme engine s novým parametrem splatnosti
-                            engine.update_transakce(
-                                trans_id=transakce_id,
-                                datum=new_datum,
-                                datum_splatnosti=new_splatnost,
-                                doklad_cislo=new_doklad,
-                                popis=new_popis
-                            )
-                            st.success("✅ Změny byly uloženy.")
-                            time.sleep(0.5)
-                            st.rerun()
+                            # Sjednocené formátování peněz
+                            st.write(f"Celkový objem transakce: **{format_money(detail['objem'])}**")
+
+                            if st.form_submit_button("💾 Uložit změny", type="primary", use_container_width=True):
+                                # Volání opravené funkce upravit_transakci (s 10 parametry dle AccountingEngine)
+                                engine.upravit_transakci(
+                                    transakce_id=transakce_id,
+                                    nove_datum=new_datum,
+                                    nove_datum_splatnosti=new_splatnost,
+                                    novy_popis=new_popis,
+                                    novy_doklad=new_doklad,
+                                    # Tyto hodnoty se v tomto jednoduchém formuláři nemění,
+                                    # načítáme je z prvního pohybu transakce
+                                    ucet_md=detail['pohyby'][0]['ucet'],
+                                    ucet_dal=detail['pohyby'][-1]['ucet'],
+                                    castka=detail['objem'],
+                                    sazba_dph=0,  # Pro zjednodušenou editaci hlavičky
+                                    smer_dph_popis='Neučtovat'
+                                )
+                                st.success("✅ Změny byly uloženy.")
+                                time.sleep(0.8)
+                                st.rerun()
         else:
             st.info("Žádné aktivní transakce neodpovídají filtrům.")
 
