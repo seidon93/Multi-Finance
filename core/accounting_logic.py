@@ -1125,16 +1125,23 @@ class AccountingEngine:
             with Database() as conn:
                 cursor = conn.cursor()
 
-                # Vytvoření hlavičky uzávěrky
-                cursor.execute("""
+                # OPRAVA PRO MS SQL SERVER:
+                # 1. SET NOCOUNT ON vypne zprávy typu "1 row affected", které pletou Python
+                # 2. OUTPUT INSERTED.id je nejspolehlivější cesta k získání nového ID
+                sql_hlavicka = """
+                    SET NOCOUNT ON;
                     INSERT INTO Transakce (klient_id, datum, popis, doklad_cislo, created_at, is_deleted)
+                    OUTPUT INSERTED.id
                     VALUES (?, ?, ?, ?, GETDATE(), 0);
-                    SELECT SCOPE_IDENTITY();
-                """, (self.klient_id, datum_uzaverky, f"Uzávěrka roku {rok}", f"UZAV-{rok}"))
+                """
 
+                cursor.execute(sql_hlavicka, (self.klient_id, datum_uzaverky, f"Uzávěrka roku {rok}", f"UZAV-{rok}"))
+
+                # Načtení ID nově vytvořené uzávěrky
                 res_id = cursor.fetchone()
                 if not res_id:
-                    return "❌ Nepodařilo se vytvořit hlavičku transakce."
+                    return "❌ Databáze nevrátila ID nové transakce."
+
                 transakce_id = int(res_id[0])
 
                 sql_ins = "INSERT INTO UcetniPohyby (transakce_id, klient_id, ucet, smer, castka) VALUES (?, ?, ?, ?, ?)"
