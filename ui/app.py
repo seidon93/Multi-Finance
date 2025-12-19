@@ -645,6 +645,58 @@ def zobrazit_reporty():
         else:
             st.caption("Žádná pasiva.")
 
+    st.markdown("---")
+    st.subheader("🏁 Přehled závěrkových převodů")
+
+    with st.expander("Zobrazit detaily uzavření účtů (710 a 702)"):
+        # Import funkce přímo z databázového modulu, pokud by náhodou nebyla v app.py dostupná
+        from core.database import execute_query
+
+        # Načtení dat o uzávěrce z Historie
+        sql_zaverka = """
+                SELECT P.ucet, R.nazev, P.smer, P.castka, T.doklad_cislo
+                FROM UcetniPohyby P
+                JOIN Transakce T ON P.transakce_id = T.id
+                LEFT JOIN UctovyRozvrh R ON P.ucet = R.cislo
+                WHERE T.doklad_cislo LIKE 'UZAV-%' AND T.klient_id = ? AND T.is_deleted = 0
+                ORDER BY P.ucet
+            """
+
+        # OPRAVA: Voláme přímo execute_query, nikoliv engine.execute_query
+        try:
+            zaverka_rows = execute_query(sql_zaverka, (KLIENT_ID,))
+        except Exception as e:
+            st.error(f"Chyba při načítání závěrkových dat: {e}")
+            zaverka_rows = []
+
+        if zaverka_rows:
+            df_z = pd.DataFrame([tuple(r) for r in zaverka_rows],
+                                columns=["Účet", "Název", "Směr", "Částka", "Doklad"])
+
+            c_vys, c_roz = st.columns(2)
+
+            with c_vys:
+                st.info("📉 Převod do Výsledovky (710)")
+                # Filtrujeme náklady (5) a výnosy (6)
+                df_710 = df_z[df_z['Účet'].astype(str).str.startswith(('5', '6'))].copy()
+                if not df_710.empty:
+                    df_710['Částka'] = df_710['Částka'].apply(lambda x: f"{float(x):,.2f} Kč".replace(",", " "))
+                    st.dataframe(df_710[["Účet", "Název", "Směr", "Částka"]], hide_index=True, width="stretch")
+                else:
+                    st.caption("Žádné výsledovkové zápisy nenalezeny.")
+
+            with c_roz:
+                st.success("⚖️ Převod do Rozvahy (702)")
+                # Filtrujeme rozvahové třídy (0-4)
+                df_702 = df_z[df_z['Účet'].astype(str).str.startswith(('0', '1', '2', '3', '4'))].copy()
+                if not df_702.empty:
+                    df_702['Částka'] = df_702['Částka'].apply(lambda x: f"{float(x):,.2f} Kč".replace(",", " "))
+                    st.dataframe(df_702[["Účet", "Název", "Směr", "Částka"]], hide_index=True, width="stretch")
+                else:
+                    st.caption("Žádné rozvahové zápisy nenalezeny.")
+        else:
+            st.warning("Pro vybrané období nebyla nalezena žádná provedená uzávěrka (doklad UZAV-XXXX).")
+
 
 def zobrazit_prehled_uctu():
     # --- TOTÁLNÍ CSS PRO CENTROVÁNÍ ---
