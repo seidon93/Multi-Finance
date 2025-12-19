@@ -394,13 +394,13 @@ def formular_nova_transakce():
 
 
 def time_filter_ui():
-    """Vykreslí filtry přesně podle obrázku (2 sloupce, Reset dole)."""
-
+    """Vykreslí filtry s pamětí v session_state."""
     st.subheader("🔍 Filtrování časového rozmezí")
 
     dnes = date.today()
     aktualni_rok = dnes.year
 
+    # Inicializace session_state pro data
     if 'filter_date_from' not in st.session_state:
         st.session_state['filter_date_from'] = None
     if 'filter_date_to' not in st.session_state:
@@ -409,60 +409,48 @@ def time_filter_ui():
     def set_dates(d_from, d_to):
         st.session_state['filter_date_from'] = d_from
         st.session_state['filter_date_to'] = d_to
-        st.rerun()
+        # Zde nevoláme rerun, aby se změna projevila až při dalším vykreslení nebo ručně
 
-    # --- KONTEJNER S BORDEREM ---
     with st.container(border=True):
         st.markdown('<div class="filter-grid">', unsafe_allow_html=True)
-
-        # 1. Řada: Dnes a Tento týden
         c1, c2 = st.columns(2)
-        if c1.button("Dnes", use_container_width=True): set_dates(dnes, dnes)
+        if c1.button("Dnes", use_container_width=True): set_dates(dnes, dnes); st.rerun()
         if c2.button("Tento týden", use_container_width=True):
             start = dnes - timedelta(days=dnes.weekday())
-            set_dates(start, start + timedelta(days=6))
+            set_dates(start, start + timedelta(days=6));
+            st.rerun()
 
-        # 2. Řada: Tento měsíc a Tento rok
         c3, c4 = st.columns(2)
         if c3.button("Tento měsíc", use_container_width=True):
             start_m = dnes.replace(day=1)
-            # Logika pro poslední den měsíce
             next_m = dnes.replace(day=28) + timedelta(days=4)
             end_m = next_m - timedelta(days=next_m.day)
-            set_dates(start_m, end_m)
+            set_dates(start_m, end_m);
+            st.rerun()
         if c4.button("Tento rok", use_container_width=True):
-            set_dates(date(aktualni_rok, 1, 1), date(aktualni_rok, 12, 31))
+            set_dates(date(aktualni_rok, 1, 1), date(aktualni_rok, 12, 31));
+            st.rerun()
 
-        # 3. Řada: Q1 a Q2
+        # ... (ostaní čtvrtletí ponechte stejně, jen přidejte st.rerun() za set_dates) ...
         q1, q2 = st.columns(2)
-        if q1.button("Čtvrtletí (Q1)", use_container_width=True):
-            set_dates(date(aktualni_rok, 1, 1), date(aktualni_rok, 3, 31))
-        if q2.button("Čtvrtletí (Q2)", use_container_width=True):
-            set_dates(date(aktualni_rok, 4, 1), date(aktualni_rok, 6, 30))
+        if q1.button("Čtvrtletí (Q1)", use_container_width=True): set_dates(date(aktualni_rok, 1, 1),
+                                                                            date(aktualni_rok, 3, 31)); st.rerun()
+        if q2.button("Čtvrtletí (Q2)", use_container_width=True): set_dates(date(aktualni_rok, 4, 1),
+                                                                            date(aktualni_rok, 6, 30)); st.rerun()
 
-        # 4. Řada: Q3 a Q4
-        q3, q4 = st.columns(2)
-        if q3.button("Čtvrtletí (Q3)", use_container_width=True):
-            set_dates(date(aktualni_rok, 7, 1), date(aktualni_rok, 9, 30))
-        if q4.button("Čtvrtletí (Q4)", use_container_width=True):
-            set_dates(date(aktualni_rok, 10, 1), date(aktualni_rok, 12, 31))
-
-        # 5. Řada: Ruční výběr dat (Vedle sebe)
+        # Ruční výběr
         f1, f2 = st.columns(2)
         new_date_from = f1.date_input("Datum OD", value=st.session_state['filter_date_from'], key='picker_from')
         new_date_to = f2.date_input("Datum DO", value=st.session_state['filter_date_to'], key='picker_to')
 
-        # 6. Řada: Reset filtrů přes celou šířku (Typ Primary = Červené)
         if st.button("Reset filtrů", type="primary", use_container_width=True):
-            set_dates(None, None)
+            set_dates(None, None);
+            st.rerun()
 
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # Detekce ruční změny v kalendáři
+    # Aktualizace stavu při ruční změně v kalendáři
     if new_date_from != st.session_state['filter_date_from'] or new_date_to != st.session_state['filter_date_to']:
         st.session_state['filter_date_from'] = new_date_from
         st.session_state['filter_date_to'] = new_date_to
-        st.rerun()
 
     return st.session_state['filter_date_from'], st.session_state['filter_date_to']
 
@@ -816,7 +804,7 @@ def zobrazit_prehled_dph():
 def zobrazit_historii_uctu():
     st.header("Historie a Správa Transakcí")
 
-    # Rozdělení na Aktivní záznamy a Koš
+    # Rozdělení na Aktivní záznamy a Koš pomocí záložek
     tab1, tab2 = st.tabs(["📋 Aktivní transakce", "🗑️ Koš (Smazané)"])
 
     from core.database import execute_query
@@ -827,19 +815,19 @@ def zobrazit_historii_uctu():
         metoda = st.radio(
             "Podle čeho chcete hledat?",
             ["📅 Podle data transakce", "📄 Podle čísla dokladu (Faktury)", "👤 Podle Klienta (ID)"],
-            horizontal=True
+            horizontal=True,
+            key="search_method_active"
         )
 
-        # Základní SQL pro aktivní transakce klienta ID 1
         sql_base = """
             SELECT T.id, T.datum, T.doklad_cislo, T.popis, SUM(P.castka) as Objem
             FROM Transakce T
             JOIN UcetniPohyby P ON T.id = P.transakce_id
             WHERE T.klient_id = ? AND T.is_deleted = 0
         """
-        params = [KLIENT_ID]  # KLIENT_ID je definováno globálně jako 1
+        params = [KLIENT_ID]
 
-        # Aplikace filtrů
+        # Aplikace filtrů s pamětí (díky st.session_state v time_filter_ui)
         if metoda == "📅 Podle data transakce":
             date_from, date_to = time_filter_ui()
             if date_from and date_to:
@@ -850,21 +838,16 @@ def zobrazit_historii_uctu():
                 return
 
         elif metoda == "📄 Podle čísla dokladu (Faktury)":
-            hledany_text = st.text_input("Zadejte číslo dokladu:", placeholder="např. FP-2025")
+            hledany_text = st.text_input("Zadejte číslo dokladu:", placeholder="např. FP-2025", key="search_doc_active")
             if hledany_text:
                 sql_base += " AND T.doklad_cislo LIKE ?"
                 params.append(f"%{hledany_text}%")
             else:
-                st.info("Zadejte číslo dokladu pro vyhledávání.")
                 return
 
         sql_base += " GROUP BY T.id, T.datum, T.doklad_cislo, T.popis ORDER BY T.datum DESC, T.id DESC"
 
-        try:
-            rows = execute_query(sql_base, tuple(params))
-        except Exception as e:
-            st.error(f"Chyba při načítání dat: {e}")
-            rows = []
+        rows = execute_query(sql_base, tuple(params))
 
         if rows:
             st.write("### Nalezené záznamy")
@@ -877,11 +860,8 @@ def zobrazit_historii_uctu():
                 df,
                 width="stretch",
                 hide_index=True,
-                key="active_editor",
-                column_config={
-                    "Smazat": st.column_config.CheckboxColumn("Smazat?", default=False),
-                    "ID": st.column_config.NumberColumn("ID", width="small", disabled=True),
-                }
+                key="active_editor_interactive",
+                column_config={"Smazat": st.column_config.CheckboxColumn("Smazat?", default=False)}
             )
 
             # Logika přesunu do koše
@@ -892,25 +872,28 @@ def zobrazit_historii_uctu():
                     for tid in ids_to_delete:
                         execute_query("UPDATE Transakce SET is_deleted = 1 WHERE id = ?", (tid,))
                     st.success("Záznamy byly přesunuty do koše.")
-                    time.sleep(1)
+                    time.sleep(0.5)
                     st.rerun()
 
             st.markdown("---")
 
-            # --- FORMULÁŘ PRO EDITACI (PŮVODNÍ STAV) ---
+            # --- SEKCE EDITACE ---
             st.subheader("✏️ Upravit vybranou transakci")
 
-            # Vytvoření seznamu pro selectbox
+            # Vytvoření seznamu pro selectbox z aktuálně vyfiltrovaných dat
             transakce_map = {f"{r[2]} | {r[1]} | {r[3]} (ID: {r[0]})": r[0] for r in rows}
-            vybrana_str = st.selectbox("Vyberte transakci k úpravě:", options=list(transakce_map.keys()))
+            vybrana_str = st.selectbox("Vyberte transakci k úpravě:", options=list(transakce_map.keys()),
+                                       key="edit_select_active")
 
             if vybrana_str:
                 transakce_id = transakce_map[vybrana_str]
                 detail = engine.get_transakce_detail(transakce_id)
 
                 if detail:
-                    with st.form(key=f"edit_form_{transakce_id}"):
-                        st.markdown(f"**Editace:** `{detail['doklad']}`")
+                    # Používáme st.container místo st.form, pokud chceme dynamické prvky,
+                    # nebo st.form s unikátním klíčem pro stabilitu
+                    with st.form(key=f"edit_form_final_{transakce_id}"):
+                        st.markdown(f"**Editujete doklad:** `{detail['doklad']}`")
 
                         c1, c2 = st.columns(2)
                         new_doklad = c1.text_input("Číslo Dokladu", value=detail['doklad'])
@@ -919,28 +902,21 @@ def zobrazit_historii_uctu():
 
                         st.markdown("---")
 
-                        # Kontace
-                        tridy_uctu = ["0 - Dlouhodobý majetek", "1 - Zásoby", "2 - Finanční účty",
+                        tridy_uctu = ["0 - Dlouhodobý majetek", "1 - Zásoby", "2 - Krát. fin. majetek",
                                       "3 - Zúčtovací vztahy", "4 - Kapitálové účty", "5 - Náklady", "6 - Výnosy",
-                                      "7 - Závěrkové účty"]
+                                      "7 - Závěrkové a podrozvahové účty"]
                         ce1, ce2 = st.columns(2)
 
                         with ce1:
-                            # Najdeme původní MD účet, pokud existuje
-                            curr_md = detail['pohyby'][0]['ucet'] if detail['pohyby'] else ""
-                            st.caption(f"Aktuální MD: {curr_md}")
-                            md_trida = st.selectbox("Nová Třída MD", tridy_uctu, key="e_md_t")
+                            md_trida = st.selectbox("Třída MD", tridy_uctu, key="e_md_t_act")
                             ucty_md = engine.get_zakladni_ucty_podle_tridy(md_trida.split(" - ")[0])
-                            sel_md = st.selectbox("Nový Účet MD", ucty_md, key="e_md_u")
+                            sel_md = st.selectbox("Účet MD", ucty_md, key="e_md_u_act")
                             ucet_md_fin = sel_md.split(" - ")[0]
 
                         with ce2:
-                            # Najdeme původní D účet
-                            curr_d = detail['pohyby'][1]['ucet'] if len(detail['pohyby']) > 1 else ""
-                            st.caption(f"Aktuální D: {curr_d}")
-                            d_trida = st.selectbox("Nová Třída D", tridy_uctu, index=2, key="e_d_t")
+                            d_trida = st.selectbox("Třída D", tridy_uctu, index=3, key="e_d_t_act")
                             ucty_d = engine.get_zakladni_ucty_podle_tridy(d_trida.split(" - ")[0])
-                            sel_d = st.selectbox("Nový Účet D", ucty_d, key="e_d_u")
+                            sel_d = st.selectbox("Účet D", ucty_d, key="e_d_u_act")
                             ucet_dal_fin = sel_d.split(" - ")[0]
 
                         # Částka a DPH
@@ -967,13 +943,13 @@ def zobrazit_historii_uctu():
                                     sazba_dph=new_sazba,
                                     smer_dph_popis=new_smer
                                 )
-                                st.success("✅ Transakce byla upravena.")
-                                time.sleep(1)
+                                st.success("✅ Transakce byla úspěšně upravena.")
+                                time.sleep(0.5)
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Chyba při ukládání: {e}")
         else:
-            st.info("Žádné aktivní transakce neodpovídají filtrům.")
+            st.info("Žádné záznamy neodpovídají filtrům.")
 
     # --- TAB 2: KOŠ (SMAZANÉ) ---
     with tab2:
@@ -990,17 +966,17 @@ def zobrazit_historii_uctu():
         if del_rows:
             df_del = pd.DataFrame([tuple(r) for r in del_rows], columns=["ID", "Datum", "Doklad", "Popis", "Objem"])
             df_del['Obnovit'] = False
-            ed_del = st.data_editor(df_del, width="stretch", hide_index=True, key="del_edit",
+            ed_del = st.data_editor(df_del, width="stretch", hide_index=True, key="trash_editor_interactive",
                                     column_config={
                                         "Obnovit": st.column_config.CheckboxColumn("Obnovit?", default=False)})
 
             ids_to_restore = ed_del[ed_del['Obnovit'] == True]['ID'].tolist()
             if ids_to_restore:
-                if st.button("♻️ Nahrát zpět vybrané", use_container_width=True):
+                if st.button("♻️ Nahrát zpět vybrané záznamy", use_container_width=True, key="restore_btn_active"):
                     for tid in ids_to_restore:
                         execute_query("UPDATE Transakce SET is_deleted = 0 WHERE id = ?", (tid,))
-                    st.success("Záznamy obnoveny.")
-                    time.sleep(1)
+                    st.success("Záznamy byly úspěšně obnoveny.")
+                    time.sleep(0.5)
                     st.rerun()
         else:
             st.info("Koš je prázdný.")
