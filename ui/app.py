@@ -1015,7 +1015,7 @@ def zobrazit_prehled_dph():
             st.dataframe(
                 df_detail,
                 hide_index=True,
-                use_container_width=True,
+                width='stretch',
                 column_config={
                     # Sjednocení formátu v tabulce na 2 desetinná místa
                     "DPH Vstup (MD)": st.column_config.NumberColumn("DPH Vstup (MD)", format="%.2f"),
@@ -1326,7 +1326,7 @@ def zobrazit_uzaverku():
         """, unsafe_allow_html=True)
 
         # Opraveno width -> use_container_width
-        if st.button("📝 Zaúčtovat daň (591 / 341)", type="primary", use_container_width=True):
+        if st.button("📝 Zaúčtovat daň (591 / 341)", type="primary", width='stretch'):
             if vypoctena_dan > 0:
                 res_id = engine.zauctovat_dan_z_prijmu(d_do, vypoctena_dan)
                 if res_id:
@@ -1343,7 +1343,7 @@ def zobrazit_uzaverku():
         rok_uzav = st.number_input("Rok k uzavření", value=dnes.year, step=1, key="rok_uzav_key")
         msg_placeholder = st.empty()
 
-        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary", use_container_width=True):
+        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary", width='stretch'):
             with st.spinner("Pracuji..."):
                 res = engine.provest_rocn_uzaverku_komplet(rok_uzav)
 
@@ -1362,7 +1362,7 @@ def zobrazit_uzaverku():
         st.subheader("Otevření nového roku (701)")
         rok_k_otevreni = st.number_input("Rok k otevření", value=dnes.year, step=1, key="rok_start_key")
         msg_open = st.empty()
-        if st.button("✨ Otevřít nový rok", use_container_width=True):
+        if st.button("✨ Otevřít nový rok", width='stretch'):
             res_open = engine.otevrit_novy_rok(rok_k_otevreni)
             if res_open and "✅" in res_open:
                 msg_open.success(res_open)
@@ -1377,7 +1377,7 @@ def zobrazit_uzaverku():
         col_lock, col_btn = st.columns([2, 1], vertical_alignment="bottom")
         d_lock = col_lock.date_input("Uzamknout k:", value=aktualni_uzaverka if aktualni_uzaverka else dnes)
 
-        if col_btn.button("🔒 Zamknout", use_container_width=True):
+        if col_btn.button("🔒 Zamknout", width='stretch'):
             engine.set_datum_uzaverky(d_lock)
             st.success(f"Účetnictví bylo uzamčeno k {d_lock.strftime('%d.%m.%Y')}.")
             st.rerun()
@@ -1479,13 +1479,16 @@ def zobrazit_financni_dashboard():
         st.dataframe(
             df_f.style.apply(
                 lambda row: ['color: #28a745' if row.typ == 'Pohledávka' else 'color: #dc3545' for _ in row], axis=1),
-            use_container_width=True, hide_index=True,
+            width='stretch', hide_index=True,
             column_config={
                 "castka": st.column_config.NumberColumn("Částka (Kč)", format="%.2f"),
+                "subjekt": st.column_config.TextColumn("Název Firmy / Partner"),  # Název z tabulky Subjekty
+                "popis": st.column_config.TextColumn("Popis Transakce"),  # Text z tabulky Transakce
                 "ico": st.column_config.TextColumn("IČO"),
                 "datum": st.column_config.DateColumn("Datum")
             }
         )
+
     # Zavoláme fragment
     render_dashboard_content(df_base)
 

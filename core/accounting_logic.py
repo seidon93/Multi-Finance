@@ -17,11 +17,10 @@ class AccountingEngine:
 
 
     def get_dashboard_data(self, d_od, d_do):
-        """Načte data pro dashboard. Názvy sloupců jsou sjednoceny pro tabulku."""
         sql = """
             SELECT 
                 T.datum as datum,
-                COALESCE(S.nazev, T.popis, 'Neznámý') as subjekt,
+                COALESCE(S.nazev, '-') as subjekt, -- Pokud není firma, zobrazíme jen pomlčku
                 COALESCE(S.email, '-') as email,
                 COALESCE(S.ico, '-') as ico,
                 CASE 
@@ -30,13 +29,12 @@ class AccountingEngine:
                     ELSE 'Ostatní'
                 END as typ,
                 CAST(P.castka AS FLOAT) as castka,
-                T.popis as popis
+                T.popis as popis -- Zde zůstává originální popis transakce
             FROM Transakce T
             JOIN UcetniPohyby P ON T.id = P.transakce_id
             LEFT JOIN Subjekty S ON T.subjekt_id = S.id
             WHERE T.klient_id = ? 
             AND T.is_deleted = 0
-            -- Vyloučení uzávěrek a daně z příjmů
             AND T.doklad_cislo NOT LIKE 'UZAV-%'
             AND T.doklad_cislo NOT LIKE 'DPPO-%'
             AND T.datum BETWEEN ? AND ?
