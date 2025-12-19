@@ -17,56 +17,100 @@ class AccountingEngine:
 
     def zkontroluj_a_oprav_db(self):
         """
-        Zkontroluje a doplní základní sloupce (datum_uzaverky, created_at, is_deleted)
-        a tabulku AuditLog v MS SQL Serveru.
+        Zkontroluje a doplní základní sloupce (is_deleted, subjekt_id atd.)
+        a tabulky (AuditLog, Subjekty) v MS SQL Serveru.
         """
         try:
-            # 1. Kontrola sloupce 'datum_uzaverky' v tabulce Klienti
-            res_uzaverka = execute_query("SELECT col_length('Klienti', 'datum_uzaverky')")
-            if not res_uzaverka or res_uzaverka[0][0] is None:
-                with Database() as conn:
-                    conn.cursor().execute("ALTER TABLE Klienti ADD datum_uzaverky DATE NULL;")
-                    conn.commit()
+            with Database() as conn:
+                cursor = conn.cursor()
 
-            # 2. Kontrola sloupce 'created_at' v tabulce Transakce
-            res_created = execute_query("SELECT col_length('Transakce', 'created_at')")
-            if not res_created or res_created[0][0] is None:
-                with Database() as conn:
-                    conn.cursor().execute("ALTER TABLE Transakce ADD created_at DATETIME DEFAULT GETDATE();")
-                    conn.commit()
+                # 1. Kontrola sloupce 'datum_uzaverky' v tabulce Klienti
+                res_uzaverka = execute_query("SELECT col_length('Klienti', 'datum_uzaverky')")
+                if not res_uzaverka or res_uzaverka[0][0] is None:
+                    cursor.execute("ALTER TABLE Klienti ADD datum_uzaverky DATE NULL;")
 
-            # 3. KLÍČOVÁ OPRAVA: Kontrola a přidání sloupce 'is_deleted' v tabulce Transakce
-            # Používáme specifickou syntaxi pro MS SQL Server (BIT)
-            res_deleted = execute_query("SELECT col_length('Transakce', 'is_deleted')")
-            if not res_deleted or res_deleted[0][0] is None:
-                with Database() as conn:
-                    cursor = conn.cursor()
-                    # Přidání sloupce a okamžité nastavení na 0 pro existující řádky
+                # 2. Kontrola sloupce 'created_at' v tabulce Transakce
+                res_created = execute_query("SELECT col_length('Transakce', 'created_at')")
+                if not res_created or res_created[0][0] is None:
+                    cursor.execute("ALTER TABLE Transakce ADD created_at DATETIME DEFAULT GETDATE();")
+
+                # 3. Kontrola sloupce 'is_deleted' v tabulce Transakce (BIT pro MS SQL)
+                res_deleted = execute_query("SELECT col_length('Transakce', 'is_deleted')")
+                if not res_deleted or res_deleted[0][0] is None:
                     cursor.execute("ALTER TABLE Transakce ADD is_deleted BIT NOT NULL DEFAULT 0;")
                     cursor.execute("UPDATE Transakce SET is_deleted = 0 WHERE is_deleted IS NULL;")
-                    conn.commit()
 
-            # 4. Kontrola a vytvoření tabulky AuditLog
-            audit_sql = """
-                IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='AuditLog' AND xtype='U')
-                BEGIN
-                    CREATE TABLE AuditLog (
-                        id INT IDENTITY(1,1) PRIMARY KEY,
-                        transakce_id INT,
-                        datum_zmeny DATETIME DEFAULT GETDATE(),
-                        typ_akce NVARCHAR(50), 
-                        puvodni_data NVARCHAR(MAX), 
-                        novy_data NVARCHAR(MAX) 
-                    );
-                END
-            """
-            with Database() as conn:
-                conn.cursor().execute(audit_sql)
+                # 4. PRIDÁNO: Kontrola sloupce 'subjekt_id' v tabulce Transakce pro Dashboard
+                res_sub_id = execute_query("SELECT col_length('Transakce', 'subjekt_id')")
+                if not res_sub_id or res_sub_id[0][0] is None:
+                    cursor.execute("ALTER TABLE Transakce ADD subjekt_id INT NULL;")
+
+                # 5. Kontrola a vytvoření tabulky AuditLog
+                audit_sql = """
+                    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='AuditLog' AND xtype='U')
+                    BEGIN
+                        CREATE TABLE AuditLog (
+                            id INT IDENTITY(1,1) PRIMARY KEY,
+                            transakce_id INT,
+                            datum_zmeny DATETIME DEFAULT GETDATE(),
+                            typ_akce NVARCHAR(50), 
+                            puvodni_data NVARCHAR(MAX), 
+                            novy_data NVARCHAR(MAX) 
+                        );
+                    END
+                """
+                cursor.execute(audit_sql)
+
+                # 6. PRIDÁNO: Kontrola a vytvoření tabulky Subjekty pro Dashboard
+                subjekty_sql = """
+                    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Subjekty' AND xtype='U')
+                    BEGIN
+                        CREATE TABLE Subjekty (
+                            id INT IDENTITY(1,1) PRIMARY KEY,
+                            klient_id INT NOT NULL,
+                            nazev NVARCHAR(200) NOT NULL,
+                            email NVARCHAR(150),
+                            telefon NVARCHAR(50),
+                            ico NVARCHAR(20)
+                        );
+                    END
+                """
+                cursor.execute(subjekty_sql)
+
                 conn.commit()
+                print("✅ Databáze byla úspěšně zkontrolována a aktualizována.")
 
         except Exception as e:
-            # Vypíšeme chybu do konzole, aby bylo vidět, co se děje při startu
-            print(f"Chyba při automatické opravě DB: {e}")
+            print(f"❌ Chyba při automatické opravě DB: {e}")
+
+    def get_dashboard_data(self, d_od, d_do):
+        """Načte data pro interaktivní finanční dashboard (Pohledávky vs Závazky)."""
+        sql = """
+            SELECT 
+                T.datum as Datum,
+                COALESCE(S.nazev, T.popis) as Subjekt,
+                COALESCE(S.email, 'info@firma.cz') as Email,
+                COALESCE(S.telefon, '-') as Telefon,
+                CASE 
+                    WHEN P.ucet LIKE '311%' THEN 'Pohledávka'
+                    WHEN P.ucet LIKE '321%' THEN 'Závazek'
+                    ELSE 'Ostatní'
+                END as Typ,
+                CAST(P.castka AS FLOAT) as Castka,
+                T.popis as Popis
+            FROM Transakce T
+            JOIN UcetniPohyby P ON T.id = P.transakce_id
+            LEFT JOIN Subjekty S ON T.subjekt_id = S.id
+            WHERE T.klient_id = ? AND T.is_deleted = 0
+            AND T.datum BETWEEN ? AND ?
+            AND (P.ucet LIKE '311%' OR P.ucet LIKE '321%')
+            ORDER BY T.datum DESC
+        """
+        try:
+            return execute_query(sql, (self.klient_id, d_od, d_do))
+        except Exception as e:
+            print(f"Dashboard data error: {e}")
+            return []
 
     def opravit_strukturu_rozvrhu(self):
         """

@@ -260,7 +260,7 @@ def zobrazit_header():
     st.sidebar.markdown("## 🗺️ Navigace")
     vyber = st.sidebar.radio(
         "Zvolte Modul:",
-        ("Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty", "Uzávěrka"),
+        ("Dashboard", "Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty", "Uzávěrka"),
         label_visibility="collapsed"
     )
     return vyber
@@ -1453,11 +1453,122 @@ def zobrazit_uzaverku():
             st.rerun()
 
 
+def get_dashboard_data(self, d_od, d_do):
+    """Načte data pro dashboard včetně kontaktů z nové tabulky Subjekty."""
+    sql = """
+        SELECT 
+            T.datum as Datum,
+            COALESCE(S.nazev, 'Neznámý subjekt') as Subjekt,
+            COALESCE(S.email, '-') as Email,
+            COALESCE(S.telefon, '-') as Telefon,
+            CASE 
+                WHEN P.ucet LIKE '311%' THEN 'Pohledávka'
+                WHEN P.ucet LIKE '321%' THEN 'Závazek'
+                ELSE 'Ostatní'
+            END as Typ,
+            CAST(P.castka AS FLOAT) as Castka,
+            T.popis as Popis
+        FROM Transakce T
+        JOIN UcetniPohyby P ON T.id = P.transakce_id
+        LEFT JOIN Subjekty S ON T.subjekt_id = S.id
+        WHERE T.klient_id = ? AND T.is_deleted = 0
+        AND T.datum BETWEEN ? AND ?
+        AND (P.ucet LIKE '311%' OR P.ucet LIKE '321%')
+        ORDER BY T.datum DESC
+    """
+    try:
+        return execute_query(sql, (self.klient_id, d_od, d_do))
+    except Exception as e:
+        print(f"Chyba při načítání dashboardu: {e}")
+        return []
+
+
+def zobrazit_financni_dashboard():
+    st.header("📊 Interaktivní Finanční Dashboard")
+
+    # 1. Klasické filtry (stabilní v session_state)
+    d_od, d_do = time_filter_ui()
+
+    if not d_od or not d_do:
+        st.info("Zvolte časové období ve filtrech pro zobrazení dat.")
+        return
+
+    # Načtení dat
+    raw_data = engine.get_dashboard_data(d_od, d_do)
+    if not raw_data:
+        st.warning("V tomto období nebyly nalezeny žádné relevantní pohledávky ani závazky.")
+        return
+
+    df = pd.DataFrame([tuple(r) for r in raw_data],
+                      columns=["Datum", "Subjekt", "Email", "Telefon", "Typ", "Částka", "Popis"])
+    df['Datum'] = pd.to_datetime(df['Datum']).dt.date
+
+    # 2. Interaktivní slicery (Posuvníky)
+    with st.container(border=True):
+        st.subheader("⚙️ Upřesnit zobrazení (Slicery)")
+        c1, c2, c3 = st.columns([1, 1, 1])
+
+        with c1:
+            f_typ = st.multiselect("Filtrovat Typ", options=df["Typ"].unique(), default=df["Typ"].unique())
+        with c2:
+            min_c = float(df["Částka"].min())
+            max_c = float(df["Částka"].max())
+            f_range = st.slider("Rozsah částky (Kč)", min_c, max_c, (min_c, max_c))
+        with c3:
+            f_search = st.text_input("Hledat subjekt/popis", placeholder="Např. Faktura...")
+
+    # Filtrování DataFrame
+    mask = (df["Typ"].isin(f_typ)) & \
+           (df["Částka"].between(f_range[0], f_range[1])) & \
+           (df["Subjekt"].str.contains(f_search, case=False) | df["Popis"].str.contains(f_search, case=False))
+    df_filtered = df[mask].copy()
+
+    # 3. Metriky a Finanční bilance
+    st.markdown("---")
+    m1, m2, m3 = st.columns(3)
+    pohl_sum = df_filtered[df_filtered["Typ"] == "Pohledávka"]["Částka"].sum()
+    zav_sum = df_filtered[df_filtered["Typ"] == "Závazek"]["Částka"].sum()
+    bilance = pohl_sum - zav_sum
+
+    m1.metric("Pohledávky (Zelená)", f"{pohl_sum:,.2f} Kč".replace(",", " "))
+    m2.metric("Závazky (Červená)", f"{zav_sum:,.2f} Kč".replace(",", " "))
+
+    # Bilance v modré barvě
+    st.markdown(f"""
+        <div style="background-color: rgba(0, 123, 255, 0.1); padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; text-align: center;">
+            <h5 style="margin:0; color: #007bff; opacity: 0.8;">AKTUÁLNÍ BILANCE (Modrá)</h5>
+            <h1 style="margin:0; color: #007bff; font-weight: bold;">{bilance:,.2f} Kč</h1>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # 4. Barevně formátovaná tabulka
+    st.subheader("📋 Detailní položky")
+
+    def color_typ(row):
+        if row['Typ'] == 'Pohledávka':
+            return ['background-color: rgba(40, 167, 69, 0.1); color: #28a745; font-weight: bold'] * len(row)
+        elif row['Typ'] == 'Závazek':
+            return ['background-color: rgba(220, 53, 69, 0.1); color: #dc3545; font-weight: bold'] * len(row)
+        return ['color: #007bff'] * len(row)
+
+    st.dataframe(
+        df_filtered.style.apply(color_typ, axis=1),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Částka": st.column_config.NumberColumn(format="%.2f Kč"),
+            "Email": st.column_config.LinkColumn("Email"),
+            "Datum": st.column_config.DateColumn("Splatnost/Vystavení")
+        }
+    )
+
 # --- Hlavní spouštěcí smyčka Streamlit ---
 if __name__ == "__main__":
     modul = zobrazit_header()
 
-    if modul == "Nová Transakce":
+    if modul == "Dashboard":
+        zobrazit_financni_dashboard()
+    elif modul == "Nová Transakce":
         formular_nova_transakce()
     elif modul == "Přehled Účtů":
         zobrazit_prehled_uctu()
