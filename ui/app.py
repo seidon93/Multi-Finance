@@ -1393,103 +1393,131 @@ def zobrazit_uzaverku():
 def cached_get_data(d_od, d_do):
     return engine.get_dashboard_data(d_od, d_do)
 
+# --- NOVINKA: FRAGMENT PRO PLYNULOU INTERAKCI ---
+
+
+@st.fragment
+def render_dashboard_content(df_base):
+    # Tady definujeme 8 názvů pro 8 sloupců
+    df_base.columns = ['datum', 'datum_splatnosti', 'subjekt', 'email', 'ico', 'typ', 'castka', 'popis']
+    dnes = date.today()
+
+    # --- FILTRY ---
+    with st.container(border=True):
+        st.subheader("⚙️ Upřesnit zobrazení")
+        c1, c2, c3 = st.columns([1, 1, 1])
+        with c1:
+            f_options = list(df_base["typ"].unique())
+            f_typ = st.multiselect("Typ", options=f_options, default=f_options, key="f_typ_v_graf")
+        with c2:
+            min_c, max_c = float(df_base["castka"].min()), float(df_base["castka"].max())
+            if min_c == max_c: max_c += 0.01
+            f_range = st.slider("Rozsah (Kč)", min_c, max_c, (min_c, max_c), key="f_slider_v_graf")
+        with c3:
+            f_search = st.text_input("Hledat subjekt/IČO/popis", key="f_search_v_graf")
+
+    # Filtrace
+    mask = (df_base["typ"].isin(f_typ)) & (df_base["castka"].between(f_range[0], f_range[1]))
+    if f_search:
+        mask = mask & (df_base["subjekt"].str.contains(f_search, case=False) |
+                       df_base["popis"].str.contains(f_search, case=False) |
+                       df_base["ico"].astype(str).str.contains(f_search))
+    df_f = df_base[mask].copy()
+
+    # --- GRAF ---
+    st.subheader("📈 Vývoj pohledávek a závazků v čase")
+    if not df_f.empty:
+        chart_data = df_f.groupby(['datum', 'typ'])['castka'].sum().unstack(fill_value=0)
+        color_map = {"Závazek": "#dc3545", "Pohledávka": "#28a745"}
+        current_colors = [color_map[col] for col in chart_data.columns if col in color_map]
+        st.line_chart(chart_data, color=current_colors)
+
+    # --- METRIKY ---
+    pohl = df_f[df_f["typ"] == "Pohledávka"]["castka"].sum()
+    zav = df_f[df_f["typ"] == "Závazek"]["castka"].sum()
+
+    m1, m2 = st.columns(2)
+    m1.metric("Pohledávky", format_money(pohl))
+    m2.metric("Závazky", format_money(zav))
+
+    # Banner bilance
+    st.markdown(f"""
+        <div style="background-color: rgba(0, 123, 255, 0.1); padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; text-align: center; margin-bottom: 20px;">
+            <h5 style="margin:0; color: #007bff; opacity: 0.8;">AKTUÁLNÍ FINANČNÍ BILANCE</h5>
+            <h1 style="margin:0; color: #007bff; font-weight: bold;">{format_money(pohl - zav)}</h1>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # --- TABULKA ---
+    def style_dashboard_rows(row):
+        text_color = '#28a745' if row.typ == 'Pohledávka' else '#dc3545'
+        base_style = f'color: {text_color}; font-weight: bold;'
+        if row.datum_splatnosti and not pd.isna(row.datum_splatnosti):
+            d_splat = row.datum_splatnosti
+            if isinstance(d_splat, str): d_splat = pd.to_datetime(d_splat).date()
+            if d_splat < dnes:
+                return [base_style + ' background-color: rgba(220, 53, 69, 0.1);'] * len(row)
+        return [base_style] * len(row)
+
+    st.dataframe(
+        df_f.style.apply(style_dashboard_rows, axis=1),
+        use_container_width=True, hide_index=True,
+        column_config={
+            "castka": st.column_config.NumberColumn("Částka (Kč)", format="%.2f"),
+            "subjekt": st.column_config.TextColumn("Partner"),
+            "popis": st.column_config.TextColumn("Popis transakce"),
+            "ico": st.column_config.TextColumn("IČO"),
+            "datum_splatnosti": st.column_config.DateColumn("Splatnost"),
+            "datum": st.column_config.DateColumn("Vystaveno")
+        }
+    )
+
+
+def zobrazit_financni_dashboard():
+    st.header("📈 Finanční Dashboard")
+    d_od, d_do = time_filter_ui()
+    raw_data = engine.get_dashboard_data(d_od, d_do)
+
+    if raw_data:
+        # TADY MUSÍ BÝT PŘESNĚ 8 NÁZVŮ (přidali jsme datum_splatnosti)
+        df_base = pd.DataFrame([tuple(r) for r in raw_data],
+                               columns=['datum', 'datum_splatnosti', 'subjekt', 'email', 'ico', 'typ', 'castka',
+                                        'popis']
+                               )
+        render_dashboard_content(df_base)
+    else:
+        st.info("V tomto období nebyly nalezeny žádné pohledávky ani závazky.")
 
 def zobrazit_financni_dashboard():
     st.header("📊 Finanční Dashboard")
 
-    # 1. ČASOVÉ FILTRY (Vždy nahoře, mimo fragment)
+    # 1. ČASOVÉ FILTRY
     d_od, d_do = time_filter_ui()
 
     if not d_od or not d_do:
         st.info("Zvolte časové období ve filtrech pro zobrazení finančních dat.")
         return
 
-    # Načtení dat z enginu (toto proběhne jen při změně data)
+    # 2. NAČTENÍ DAT
     raw_data = engine.get_dashboard_data(d_od, d_do)
 
     if not raw_data:
         st.warning("V tomto období nejsou žádné reálné obchodní pohledávky ani závazky.")
         return
 
-    df_base = pd.DataFrame([tuple(r) for r in raw_data],
-                           columns=["Datum", "Subjekt", "Email", "Telefon", "Typ", "Částka", "Popis"])
-    df_base['Datum'] = pd.to_datetime(df_base['Datum']).dt.date
+    # 3. VYTVOŘENÍ DATAFRAME (Důležité: Pořadí musí sedět s SQL dotazem!)
+    # SQL vrací: datum, datum_splatnosti, subjekt, email, ico, typ, castka, popis
+    df_base = pd.DataFrame(
+        [tuple(r) for r in raw_data],
+        columns=['datum', 'datum_splatnosti', 'subjekt', 'email', 'ico', 'typ', 'castka', 'popis']
+    )
 
-    # --- NOVINKA: FRAGMENT PRO PLYNULOU INTERAKCI ---
-    @st.fragment
-    def render_dashboard_content(df_base):
-        # POJISTKA: Sjednocení názvů sloupců
-        df_base.columns = ['datum', 'subjekt', 'email', 'ico', 'typ', 'castka', 'popis']
+    # Převod na čisté datum pro správné zobrazení
+    df_base['datum'] = pd.to_datetime(df_base['datum']).dt.date
+    if 'datum_splatnosti' in df_base.columns:
+        df_base['datum_splatnosti'] = pd.to_datetime(df_base['datum_splatnosti']).dt.date
 
-        # 1. FILTRY (Zůstávají stejné)
-        with st.container(border=True):
-            st.subheader("⚙️ Upřesnit zobrazení")
-            c1, c2, c3 = st.columns([1, 1, 1])
-            with c1:
-                f_typ = st.multiselect("Typ", options=list(df_base["typ"].unique()),
-                                       default=list(df_base["typ"].unique()), key="f_typ_v_graf")
-            with c2:
-                min_c, max_c = float(df_base["castka"].min()), float(df_base["castka"].max())
-                if min_c == max_c: max_c += 0.01
-                f_range = st.slider("Rozsah (Kč)", min_c, max_c, (min_c, max_c), key="f_slider_v_graf")
-            with c3:
-                f_search = st.text_input("Hledat subjekt/IČO/popis", key="f_search_v_graf")
-
-        # Filtrace dat
-        mask = (df_base["typ"].isin(f_typ)) & (df_base["castka"].between(f_range[0], f_range[1]))
-        if f_search:
-            mask = mask & (df_base["subjekt"].str.contains(f_search, case=False) |
-                           df_base["popis"].str.contains(f_search, case=False) |
-                           df_base["ico"].astype(str).str.contains(f_search))
-        df_f = df_base[mask].copy()
-
-        # 2. GRAF VÝVOJE (Novinka)
-        st.subheader("📈 Vývoj pohledávek a závazků v čase")
-        if not df_f.empty:
-            # Příprava dat pro graf
-            chart_data = df_f.groupby(['datum', 'typ'])['castka'].sum().unstack(fill_value=0)
-
-            # Dynamické určení barev podle toho, co v datech zbylo
-            # Pokud v datech chybí Závazek nebo Pohledávka, vybereme jen ty barvy, které jsou potřeba
-            color_map = {"Závazek": "#dc3545", "Pohledávka": "#28a745"}
-            current_colors = [color_map[col] for col in chart_data.columns if col in color_map]
-
-            # Vykreslení grafu se správným počtem barev
-            st.line_chart(chart_data, color=current_colors)
-        else:
-            st.info("Pro zobrazení grafu nejsou k dispozici žádná data.")
-
-        # 3. METRIKY A BILANCE (Sjednocený formát)
-        pohl = df_f[df_f["typ"] == "Pohledávka"]["castka"].sum()
-        zav = df_f[df_f["typ"] == "Závazek"]["castka"].sum()
-        bilance = pohl - zav
-
-        m1, m2 = st.columns(2)
-        m1.metric("Pohledávky", format_money(pohl))
-        m2.metric("Závazky", format_money(zav))
-
-        st.markdown(f"""
-                <div style="background-color: rgba(0, 123, 255, 0.1); padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; text-align: center; margin-bottom: 20px;">
-                    <h5 style="margin:0; color: #007bff; opacity: 0.8;">AKTUÁLNÍ FINANČNÍ BILANCE</h5>
-                    <h1 style="margin:0; color: #007bff; font-weight: bold;">{format_money(bilance)}</h1>
-                </div>
-            """, unsafe_allow_html=True)
-
-        # 4. TABULKA (Sjednocený formát)
-        st.dataframe(
-            df_f.style.apply(
-                lambda row: ['color: #28a745' if row.typ == 'Pohledávka' else 'color: #dc3545' for _ in row], axis=1),
-            width='stretch', hide_index=True,
-            column_config={
-                "castka": st.column_config.NumberColumn("Částka (Kč)", format="%.2f"),
-                "subjekt": st.column_config.TextColumn("Název Firmy / Partner"),  # Název z tabulky Subjekty
-                "popis": st.column_config.TextColumn("Popis Transakce"),  # Text z tabulky Transakce
-                "ico": st.column_config.TextColumn("IČO"),
-                "datum": st.column_config.DateColumn("Datum")
-            }
-        )
-
-    # Zavoláme fragment
+    # 4. VOLÁNÍ VYKRESLOVACÍ FUNKCE (Bez tohoto řádku nic neuvidíte!)
     render_dashboard_content(df_base)
 
 

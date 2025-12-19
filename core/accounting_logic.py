@@ -17,32 +17,32 @@ class AccountingEngine:
 
 
     def get_dashboard_data(self, d_od, d_do):
+        """Načte data pro dashboard – musí vracet přesně 8 sloupců."""
         sql = """
             SELECT 
                 T.datum as datum,
-                COALESCE(S.nazev, '-') as subjekt, -- Pokud není firma, zobrazíme jen pomlčku
-                COALESCE(S.email, '-') as email,
-                COALESCE(S.ico, '-') as ico,
+                T.datum_splatnosti as datum_splatnosti, -- 2. sloupec (přidán)
+                COALESCE(S.nazev, '-') as subjekt,       -- 3. sloupec
+                COALESCE(S.email, '-') as email,         -- 4. sloupec
+                COALESCE(S.ico, '-') as ico,             -- 5. sloupec
                 CASE 
                     WHEN P.ucet LIKE '311%' THEN 'Pohledávka'
                     WHEN P.ucet LIKE '321%' THEN 'Závazek'
-                    ELSE 'Ostatní'
-                END as typ,
-                CAST(P.castka AS FLOAT) as castka,
-                T.popis as popis -- Zde zůstává originální popis transakce
+                END as typ,                              -- 6. sloupec
+                CAST(P.castka AS FLOAT) as castka,       -- 7. sloupec
+                T.popis as popis                         -- 8. sloupec
             FROM Transakce T
             JOIN UcetniPohyby P ON T.id = P.transakce_id
             LEFT JOIN Subjekty S ON T.subjekt_id = S.id
             WHERE T.klient_id = ? 
             AND T.is_deleted = 0
-            AND T.doklad_cislo NOT LIKE 'UZAV-%'
-            AND T.doklad_cislo NOT LIKE 'DPPO-%'
             AND T.datum BETWEEN ? AND ?
             AND (P.ucet LIKE '311%' OR P.ucet LIKE '321%')
             ORDER BY T.datum DESC
         """
         try:
             from core.database import execute_query
+            # DŮLEŽITÉ: execute_query musí vrátit seznam řádků
             return execute_query(sql, (self.klient_id, d_od, d_do))
         except Exception as e:
             print(f"SQL Error: {e}")
