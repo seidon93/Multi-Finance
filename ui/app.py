@@ -261,7 +261,7 @@ def zobrazit_header():
     vyber = st.sidebar.radio(
         "Zvolte Modul:",
         ( "Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty", "Uzávěrka", "Finanční dashboard"),
-        label_visibility="collapsed"
+        label_visibility="collapsed",key="hlavni_navigace"
     )
     return vyber
 
@@ -1453,53 +1453,20 @@ def zobrazit_uzaverku():
             st.rerun()
 
 
-def get_dashboard_data(self, d_od, d_do):
-    """Načte data pro Finanční dashboard. Automaticky vylučuje daně z příjmů a uzávěrky."""
-    sql = """
-        SELECT 
-            T.datum as Datum,
-            COALESCE(S.nazev, T.popis) as Subjekt,
-            COALESCE(S.email, 'info@firma.cz') as Email,
-            COALESCE(S.telefon, '-') as Telefon,
-            CASE 
-                WHEN P.ucet LIKE '311%' THEN 'Pohledávka'
-                WHEN P.ucet LIKE '321%' THEN 'Závazek'
-                ELSE 'Ostatní'
-            END as Typ,
-            CAST(P.castka AS FLOAT) as Castka,
-            T.popis as Popis
-        FROM Transakce T
-        JOIN UcetniPohyby P ON T.id = P.transakce_id
-        LEFT JOIN Subjekty S ON T.subjekt_id = S.id
-        WHERE T.klient_id = ? 
-        AND T.is_deleted = 0
-        -- VYLOUČENÍ VNITŘNÍCH ÚČETNÍCH OPERACÍ --
-        AND T.doklad_cislo NOT LIKE 'UZAV-%'  -- Vyloučí uzávěrky všech let
-        AND T.doklad_cislo NOT LIKE 'DPPO-%'  -- Vyloučí daň z příjmů
-        ------------------------------------------
-        AND T.datum BETWEEN ? AND ?
-        AND (P.ucet LIKE '311%' OR P.ucet LIKE '321%')
-        ORDER BY T.datum DESC
-    """
-    try:
-        from core.database import execute_query
-        return execute_query(sql, (self.klient_id, d_od, d_do))
-    except Exception as e:
-        print(f"Finanční dashboard data error: {e}")
-        return []
-
-
 def zobrazit_financni_dashboard():
+    # POJISTKA PROTI RESETU: Uložíme informaci o modulu do paměti session_state
+    st.session_state['current_module'] = "Finanční Dashboard"
+
     st.header("📊 Finanční Dashboard")
 
-    # 1. Klasické filtry (stabilní v session_state díky vašim předchozím opravám)
+    # 1. Klasické časové filtry (zůstávají nahoře stabilní)
     d_od, d_do = time_filter_ui()
 
     if not d_od or not d_do:
         st.info("Zvolte časové období ve filtrech pro zobrazení finančních dat.")
         return
 
-    # Načtení dat (očištěných o daně a uzávěrky)
+    # Načtení očištěných dat z SQL
     raw_data = engine.get_dashboard_data(d_od, d_do)
     if not raw_data:
         st.warning("V tomto období nejsou žádné reálné obchodní pohledávky ani závazky.")
@@ -1509,24 +1476,32 @@ def zobrazit_financni_dashboard():
                       columns=["Datum", "Subjekt", "Email", "Telefon", "Typ", "Částka", "Popis"])
     df['Datum'] = pd.to_datetime(df['Datum']).dt.date
 
-    # 2. Interaktivní slicery (Posuvníky)
+    # 2. Interaktivní slicery s UNIKÁTNÍMI KLÍČI (zabrání uskakován stránky)
     with st.container(border=True):
         st.subheader("⚙️ Upřesnit zobrazení")
         c1, c2, c3 = st.columns([1, 1, 1])
 
         with c1:
-            f_typ = st.multiselect("Filtrovat Typ", options=df["Typ"].unique(), default=df["Typ"].unique())
+            f_typ = st.multiselect("Filtrovat Typ",
+                                   options=df["Typ"].unique(),
+                                   default=df["Typ"].unique(),
+                                   key="dash_ms_type_stable")
         with c2:
             min_c = float(df["Částka"].min())
             max_c = float(df["Částka"].max())
-            f_range = st.slider("Rozsah částky (Kč)", min_c, max_c, (min_c, max_c))
+            f_range = st.slider("Rozsah částky (Kč)",
+                                min_c, max_c, (min_c, max_c),
+                                key="dash_slider_stable")  # <--- TENTO KLÍČ DRŽÍ POZICI
         with c3:
-            f_search = st.text_input("Hledat subjekt/popis", placeholder="Např. Faktura...", key="dash_search_stable")
+            f_search = st.text_input("Hledat subjekt/popis",
+                                     placeholder="Např. Faktura...",
+                                     key="dash_search_stable")
 
-    # Filtrování DataFrame
+    # Filtrace přes masku na základě slicerů
     mask = (df["Typ"].isin(f_typ)) & \
            (df["Částka"].between(f_range[0], f_range[1])) & \
            (df["Subjekt"].str.contains(f_search, case=False) | df["Popis"].str.contains(f_search, case=False))
+
     df_filtered = df[mask].copy()
 
     # 3. Metriky a Finanční bilance
@@ -1551,7 +1526,6 @@ def zobrazit_financni_dashboard():
     st.subheader("📋 Detailní položky dashboardu")
 
     def color_typ(row):
-        # Barevné kódování dle typu
         if row['Typ'] == 'Pohledávka':
             return ['color: #28a745; font-weight: bold'] * len(row)
         elif row['Typ'] == 'Závazek':
@@ -1561,7 +1535,7 @@ def zobrazit_financni_dashboard():
 
     st.dataframe(
         df_filtered.style.apply(color_typ, axis=1),
-        width='stretch',
+        use_container_width=True,
         hide_index=True,
         column_config={
             "Částka": st.column_config.NumberColumn(format="%.2f Kč"),

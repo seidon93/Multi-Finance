@@ -1338,3 +1338,43 @@ class AccountingEngine:
         except Exception as e:
             print(f"Chyba při načítání analytiky: {e}")
             return []
+
+    def get_dashboard_data(self, d_od, d_do):
+        """
+        Načte data pro Finanční dashboard.
+        STRIKTNĚ VYLOUČENO: Uzávěrky (UZAV-) a Daně z příjmů (DPPO-).
+        """
+        sql = """
+            SELECT 
+                T.datum as Datum,
+                COALESCE(S.nazev, T.popis) as Subjekt,
+                COALESCE(S.email, 'info@firma.cz') as Email,
+                COALESCE(S.telefon, '-') as Telefon,
+                CASE 
+                    WHEN P.ucet LIKE '311%' THEN 'Pohledávka'
+                    WHEN P.ucet LIKE '321%' THEN 'Závazek'
+                    ELSE 'Ostatní'
+                END as Typ,
+                CAST(P.castka AS FLOAT) as Castka,
+                T.popis as Popis
+            FROM Transakce T
+            JOIN UcetniPohyby P ON T.id = P.transakce_id
+            LEFT JOIN Subjekty S ON T.subjekt_id = S.id
+            WHERE T.klient_id = ? 
+            AND T.is_deleted = 0
+
+            -- FILTR PRO ČISTÁ DATA (Bez vnitřních účetních operací) --
+            AND T.doklad_cislo NOT LIKE 'UZAV-%'  -- Vyloučí uzávěrky (všechny roky)
+            AND T.doklad_cislo NOT LIKE 'DPPO-%'  -- Vyloučí daň z příjmů
+            ---------------------------------------------------------
+
+            AND T.datum BETWEEN ? AND ?
+            AND (P.ucet LIKE '311%' OR P.ucet LIKE '321%')
+            ORDER BY T.datum DESC
+        """
+        try:
+            from core.database import execute_query
+            return execute_query(sql, (self.klient_id, d_od, d_do))
+        except Exception as e:
+            print(f"Chyba při načítání dat dashboardu: {e}")
+            return []
