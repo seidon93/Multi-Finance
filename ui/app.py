@@ -1418,25 +1418,24 @@ def zobrazit_financni_dashboard():
     # --- NOVINKA: FRAGMENT PRO PLYNULOU INTERAKCI ---
     @st.fragment
     def render_dashboard_content(df_base):
-        # POJISTKA: Sjednocení názvů sloupců z SQL na malá písmena
+        # POJISTKA: Sjednocení názvů sloupců
         df_base.columns = ['datum', 'subjekt', 'email', 'ico', 'typ', 'castka', 'popis']
 
-        # 1. INTERAKTIVNÍ FILTRY
+        # 1. FILTRY (Zůstávají stejné)
         with st.container(border=True):
             st.subheader("⚙️ Upřesnit zobrazení")
             c1, c2, c3 = st.columns([1, 1, 1])
             with c1:
                 f_typ = st.multiselect("Typ", options=list(df_base["typ"].unique()),
-                                       default=list(df_base["typ"].unique()), key="f_typ_unified_v2")
+                                       default=list(df_base["typ"].unique()), key="f_typ_v_graf")
             with c2:
-                min_c = float(df_base["castka"].min())
-                max_c = float(df_base["castka"].max())
+                min_c, max_c = float(df_base["castka"].min()), float(df_base["castka"].max())
                 if min_c == max_c: max_c += 0.01
-                f_range = st.slider("Rozsah (Kč)", min_c, max_c, (min_c, max_c), key="f_slider_unified_v2")
+                f_range = st.slider("Rozsah (Kč)", min_c, max_c, (min_c, max_c), key="f_slider_v_graf")
             with c3:
-                f_search = st.text_input("Hledat subjekt/IČO/popis", key="f_search_unified_v2")
+                f_search = st.text_input("Hledat subjekt/IČO/popis", key="f_search_v_graf")
 
-        # 2. FILTRACE
+        # Filtrace dat
         mask = (df_base["typ"].isin(f_typ)) & (df_base["castka"].between(f_range[0], f_range[1]))
         if f_search:
             mask = mask & (df_base["subjekt"].str.contains(f_search, case=False) |
@@ -1444,44 +1443,39 @@ def zobrazit_financni_dashboard():
                            df_base["ico"].astype(str).str.contains(f_search))
         df_f = df_base[mask].copy()
 
-        # 3. METRIKY A BILANCE - JEDNOTNÝ FORMÁT
+        # 2. GRAF VÝVOJE (Novinka)
+        st.subheader("📈 Vývoj pohledávek a závazků v čase")
+        if not df_f.empty:
+            # Příprava dat pro graf: seskupení podle data a typu
+            chart_data = df_f.groupby(['datum', 'typ'])['castka'].sum().unstack(fill_value=0)
+            st.line_chart(chart_data, color=["#dc3545", "#28a745"])  # Červená pro závazky, zelená pro pohledávky
+        else:
+            st.info("Pro zobrazení grafu nejsou k dispozici žádná data.")
+
+        # 3. METRIKY A BILANCE (Sjednocený formát)
         pohl = df_f[df_f["typ"] == "Pohledávka"]["castka"].sum()
         zav = df_f[df_f["typ"] == "Závazek"]["castka"].sum()
         bilance = pohl - zav
 
-        # Pomocná funkce pro sjednocení vzhledu (1 234 567.89 Kč)
-        def fmt(x):
-            return f"{x:,.2f}".replace(",", " ")
-
         m1, m2 = st.columns(2)
-        m1.metric("Pohledávky", f"{fmt(pohl)} Kč")
-        m2.metric("Závazky", f"{fmt(zav)} Kč")
+        m1.metric("Pohledávky", format_money(pohl))
+        m2.metric("Závazky", format_money(zav))
 
-        # BANNER - Sjednocen s metrikami i tabulkou
         st.markdown(f"""
                 <div style="background-color: rgba(0, 123, 255, 0.1); padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; text-align: center; margin-bottom: 20px;">
                     <h5 style="margin:0; color: #007bff; opacity: 0.8;">AKTUÁLNÍ FINANČNÍ BILANCE</h5>
-                    <h1 style="margin:0; color: #007bff; font-weight: bold;">{fmt(bilance)} Kč</h1>
+                    <h1 style="margin:0; color: #007bff; font-weight: bold;">{format_money(bilance)}</h1>
                 </div>
             """, unsafe_allow_html=True)
 
-        # 4. TABULKA - Sjednocena s banerem
-        def color_typ(row):
-            if row['typ'] == 'Pohledávka':
-                return ['color: #28a745; font-weight: bold'] * len(row)
-            elif row['typ'] == 'Závazek':
-                return ['color: #dc3545; font-weight: bold'] * len(row)
-            return ['color: #007bff; font-weight: bold'] * len(row)
-
+        # 4. TABULKA (Sjednocený formát)
         st.dataframe(
-            df_f.style.apply(color_typ, axis=1),
+            df_f.style.apply(
+                lambda row: ['color: #28a745' if row.typ == 'Pohledávka' else 'color: #dc3545' for _ in row], axis=1),
             use_container_width=True, hide_index=True,
             column_config={
-                # Formátování "%.2f" v tabulce zajistí shodu s fmt(x)
                 "castka": st.column_config.NumberColumn("Částka (Kč)", format="%.2f"),
                 "ico": st.column_config.TextColumn("IČO"),
-                "subjekt": st.column_config.TextColumn("Subjekt"),
-                "email": st.column_config.LinkColumn("Email"),
                 "datum": st.column_config.DateColumn("Datum")
             }
         )
