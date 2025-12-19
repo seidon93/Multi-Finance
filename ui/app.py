@@ -1446,9 +1446,16 @@ def zobrazit_financni_dashboard():
         # 2. GRAF VÝVOJE (Novinka)
         st.subheader("📈 Vývoj pohledávek a závazků v čase")
         if not df_f.empty:
-            # Příprava dat pro graf: seskupení podle data a typu
+            # Příprava dat pro graf
             chart_data = df_f.groupby(['datum', 'typ'])['castka'].sum().unstack(fill_value=0)
-            st.line_chart(chart_data, color=["#dc3545", "#28a745"])  # Červená pro závazky, zelená pro pohledávky
+
+            # Dynamické určení barev podle toho, co v datech zbylo
+            # Pokud v datech chybí Závazek nebo Pohledávka, vybereme jen ty barvy, které jsou potřeba
+            color_map = {"Závazek": "#dc3545", "Pohledávka": "#28a745"}
+            current_colors = [color_map[col] for col in chart_data.columns if col in color_map]
+
+            # Vykreslení grafu se správným počtem barev
+            st.line_chart(chart_data, color=current_colors)
         else:
             st.info("Pro zobrazení grafu nejsou k dispozici žádná data.")
 
