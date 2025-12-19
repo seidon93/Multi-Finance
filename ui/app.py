@@ -259,7 +259,7 @@ def zobrazit_header():
     st.sidebar.markdown("## 🗺️ Navigace")
     vyber = st.sidebar.radio(
         "Zvolte Modul:",
-        ("Finanční Dashboard", "Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty", "Uzávěrka"),
+        ("Nová Transakce", "Přehled Účtů", "Přehled DPH", "Historie", "Reporty", "Uzávěrka", "Finanční Dashboard"),
         label_visibility="collapsed", key="main_navigation_stable"
     )
     return vyber
@@ -1457,87 +1457,87 @@ def zobrazit_uzaverku():
             st.rerun()
 
 
+# Pomocná funkce pro cachování dat (umístěte ji nad zobrazit_financni_dashboard nebo na začátek souboru)
+@st.cache_data(show_spinner=False)
+def cached_get_data(d_od, d_do):
+    return engine.get_dashboard_data(d_od, d_do)
+
+
 def zobrazit_financni_dashboard():
     st.header("📊 Finanční Dashboard")
 
-    # 1. Klasické filtry (stabilní v session_state)
+    # 1. ČASOVÉ FILTRY (Vždy nahoře, mimo fragment)
     d_od, d_do = time_filter_ui()
 
     if not d_od or not d_do:
         st.info("Zvolte časové období ve filtrech pro zobrazení finančních dat.")
         return
 
-    # Načtení dat přes novou metodu v enginu
+    # Načtení dat z enginu (toto proběhne jen při změně data)
     raw_data = engine.get_dashboard_data(d_od, d_do)
 
     if not raw_data:
-        st.warning("V tomto období nejsou žádné reálné obchodní pohledávky ani závazky (mimo uzávěrky).")
+        st.warning("V tomto období nejsou žádné reálné obchodní pohledávky ani závazky.")
         return
 
-    df = pd.DataFrame([tuple(r) for r in raw_data],
-                      columns=["Datum", "Subjekt", "Email", "Telefon", "Typ", "Částka", "Popis"])
-    df['Datum'] = pd.to_datetime(df['Datum']).dt.date
+    df_base = pd.DataFrame([tuple(r) for r in raw_data],
+                           columns=["Datum", "Subjekt", "Email", "Telefon", "Typ", "Částka", "Popis"])
+    df_base['Datum'] = pd.to_datetime(df_base['Datum']).dt.date
 
-    # 2. Interaktivní slicery s UNIKÁTNÍMI KLÍČI (zabrání resetu na filtry)
-    with st.container(border=True):
-        st.subheader("⚙️ Upřesnit zobrazení")
-        c1, c2, c3 = st.columns([1, 1, 1])
+    # --- NOVINKA: FRAGMENT PRO PLYNULOU INTERAKCI ---
+    @st.fragment
+    def render_dashboard_content(df):
+        # 2. Interaktivní filtry (Už NEJSOU ve formě, reagují okamžitě, ale lokálně)
+        with st.container(border=True):
+            st.subheader("⚙️ Upřesnit zobrazení")
+            c1, c2, c3 = st.columns([1, 1, 1])
 
-        with c1:
-            f_typ = st.multiselect("Filtrovat Typ", options=df["Typ"].unique(),
-                                   default=df["Typ"].unique(), key="dash_ms_type_stable")
-        with c2:
-            min_c = float(df["Částka"].min())
-            max_c = float(df["Částka"].max())
-            # KEY dash_slider_amount zabrání návratu nahoru
-            f_range = st.slider("Rozsah částky (Kč)", min_c, max_c, (min_c, max_c), key="dash_slider_amount")
-        with c3:
-            f_search = st.text_input("Hledat subjekt/popis", placeholder="Např. Faktura...", key="dash_search_stable")
+            with c1:
+                f_typ = st.multiselect("Typ", options=list(df["Typ"].unique()),
+                                       default=list(df["Typ"].unique()), key="frag_typ")
+            with c2:
+                min_c, max_c = float(df["Částka"].min()), float(df["Částka"].max())
+                if min_c == max_c: max_c += 1.0
+                f_range = st.slider("Rozsah částky (Kč)", min_c, max_c, (min_c, max_c), key="frag_slider")
+            with c3:
+                f_search = st.text_input("Hledat subjekt/popis", placeholder="Hledat...", key="frag_search")
 
-    # --- LOGIKA FILTROVÁNÍ (MASK) ---
-    mask = (df["Typ"].isin(f_typ)) & \
-           (df["Částka"].between(f_range[0], f_range[1])) & \
-           (df["Subjekt"].str.contains(f_search, case=False) | df["Popis"].str.contains(f_search, case=False))
-    df_filtered = df[mask].copy()
+        # Filtrování v paměti
+        mask = (df["Typ"].isin(f_typ)) & (df["Částka"].between(f_range[0], f_range[1]))
+        if f_search:
+            mask = mask & (df["Subjekt"].str.contains(f_search, case=False) |
+                           df["Popis"].str.contains(f_search, case=False))
 
-    # 3. Metriky a Finanční bilance
-    st.markdown("---")
-    m1, m2 = st.columns(2)
-    pohl_sum = df_filtered[df_filtered["Typ"] == "Pohledávka"]["Částka"].sum()
-    zav_sum = df_filtered[df_filtered["Typ"] == "Závazek"]["Částka"].sum()
-    bilance = pohl_sum - zav_sum
+        df_f = df[mask].copy()
 
-    m1.metric("Pohledávky (Zelená)", f"{pohl_sum:,.2f} Kč".replace(",", " "))
-    m2.metric("Závazky (Červená)", f"{zav_sum:,.2f} Kč".replace(",", " "))
+        # 3. Metriky
+        st.markdown("---")
+        pohl = df_f[df_f["Typ"] == "Pohledávka"]["Částka"].sum()
+        zav = df_f[df_f["Typ"] == "Závazek"]["Částka"].sum()
 
-    # Banner bilance v modré
-    st.markdown(f"""
-        <div style="background-color: rgba(0, 123, 255, 0.1); padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; text-align: center;">
-            <h5 style="margin:0; color: #007bff; opacity: 0.8;">AKTUÁLNÍ FINANČNÍ BILANCE </h5>
-            <h1 style="margin:0; color: #007bff; font-weight: bold;">{bilance:,.2f} Kč</h1>
-        </div>
-    """, unsafe_allow_html=True)
+        m1, m2 = st.columns(2)
+        m1.metric("Pohledávky", f"{pohl:,.2f} Kč")
+        m2.metric("Závazky", f"{zav:,.2f} Kč")
 
-    # 4. Barevně formátovaná tabulka
-    st.subheader("📋 Detailní položky dashboardu")
+        st.markdown(f"""
+            <div style="background-color: rgba(0, 123, 255, 0.1); padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; text-align: center; margin-bottom: 20px;">
+                <h5 style="margin:0; color: #007bff; opacity: 0.8;">AKTUÁLNÍ FINANČNÍ BILANCE </h5>
+                <h1 style="margin:0; color: #007bff; font-weight: bold;">{(pohl - zav):,.2f} Kč</h1>
+            </div>
+        """, unsafe_allow_html=True)
 
-    def color_typ(row):
-        if row['Typ'] == 'Pohledávka':
-            return ['color: #28a745; font-weight: bold'] * len(row)
-        elif row['Typ'] == 'Závazek':
-            return ['color: #dc3545; font-weight: bold'] * len(row)
-        return ['color: #007bff; font-weight: bold'] * len(row)
+        # 4. Tabulka
+        def color_typ(row):
+            if row['Typ'] == 'Pohledávka':
+                return ['color: #28a745; font-weight: bold'] * len(row)
+            elif row['Typ'] == 'Závazek':
+                return ['color: #dc3545; font-weight: bold'] * len(row)
+            return ['color: #007bff; font-weight: bold'] * len(row)
 
-    st.dataframe(
-        df_filtered.style.apply(color_typ, axis=1),
-        width='stretch',
-        hide_index=True,
-        column_config={
-            "Částka": st.column_config.NumberColumn(format="%.2f Kč"),
-            "Email": st.column_config.LinkColumn("Email"),
-            "Datum": st.column_config.DateColumn("Datum Splatnosti/Vystavení")
-        }
-    )
+        st.dataframe(df_f.style.apply(color_typ, axis=1), width='stretch', hide_index=True)
+
+    # Zavoláme fragment
+    render_dashboard_content(df_base)
 
 
 # 3. Rozcestník na konci souboru
