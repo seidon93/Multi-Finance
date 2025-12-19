@@ -1184,40 +1184,74 @@ class AccountingEngine:
         except Exception as e:
             return f"❌ Chyba při uzávěrce: {str(e)}"
 
-    def otevrit_novy_rok(self, stary_rok):
-        nr = stary_rok + 1;
-        datum_otevreni = date(nr, 1, 1)
+    def otevrit_novy_rok(self, rok_k_otevreni):
+        """
+        Otevře nový rok (701) na základě uzávěrky (702) z minulého roku.
+        Parametrem je rok, který chceme ZAČÍT účtovat (např. 2026).
+        """
+        stary_rok = rok_k_otevreni - 1
+        datum_otevreni = date(rok_k_otevreni, 1, 1)
+        doklad_uzav = f"UZAV-{stary_rok}"
+        doklad_poc = f"POC-{rok_k_otevreni}"
 
-        # Najdeme data z UZAV-{stary_rok}
-        sql = "SELECT P.ucet, P.smer, P.castka FROM UcetniPohyby P JOIN Transakce T ON T.id=P.transakce_id WHERE T.doklad_cislo=? AND P.klient_id=? AND P.ucet NOT IN ('702','710')"
-        rows = execute_query(sql, (f"UZAV-{stary_rok}", self.klient_id))
+        # 1. Kontrola, zda už počáteční stav neexistuje
+        check_exists = execute_query(
+            "SELECT id FROM Transakce WHERE doklad_cislo = ? AND klient_id = ? AND is_deleted = 0",
+            (doklad_poc, self.klient_id)
+        )
+        if check_exists:
+            return f"⚠️ Počáteční stavy pro rok {rok_k_otevreni} již byly vygenerovány ({doklad_poc})."
 
-        # Najdeme HV z minuleho roku (na uctu 702)
-        sqlhv = "SELECT SUM(CASE WHEN P.smer='D' THEN P.castka ELSE -P.castka END) FROM UcetniPohyby P JOIN Transakce T ON T.id=P.transakce_id WHERE T.doklad_cislo=? AND P.ucet='702'"
-        reshv = execute_query(sqlhv, (f"UZAV-{stary_rok}", self.klient_id))
-        hv = reshv[0][0] if reshv and reshv[0][0] else 0.0
+        # 2. Najdeme data z uzávěrky minulého roku (vše kromě závěrkových účtů)
+        sql = """
+            SELECT P.ucet, P.smer, P.castka 
+            FROM UcetniPohyby P 
+            JOIN Transakce T ON T.id = P.transakce_id 
+            WHERE T.doklad_cislo = ? AND P.klient_id = ? AND T.is_deleted = 0
+            AND P.ucet NOT IN ('702','710')
+        """
+        rows = execute_query(sql, (doklad_uzav, self.klient_id))
 
-        if not rows and abs(hv) < 0.01: return "⚠️ Nenalezena uzávěrka pro minulý rok."
+        # 3. Najdeme HV z minulého roku na účtu 702
+        sqlhv = """
+            SELECT SUM(CASE WHEN P.smer='D' THEN P.castka ELSE -P.castka END) 
+            FROM UcetniPohyby P 
+            JOIN Transakce T ON T.id = P.transakce_id 
+            WHERE T.doklad_cislo = ? AND P.klient_id = ? AND P.ucet = '702' AND T.is_deleted = 0
+        """
+        reshv = execute_query(sqlhv, (doklad_uzav, self.klient_id))
+        hv = reshv[0][0] if reshv and reshv[0][0] is not None else 0.0
 
-        self.zajisti_existenci_uctu("701", "Počáteční účet")
-        self.zajisti_existenci_uctu("431", "HV ve schvalovacím")
+        if not rows and abs(hv) < 0.01:
+            return f"⚠️ Nenalezena platná uzávěrka pro rok {stary_rok} (doklad {doklad_uzav})."
+
+        self.zajisti_existenci_uctu("701", "Počáteční účet rozvažný")
+        self.zajisti_existenci_uctu("431", "Výsledek hospodaření ve schvalovacím řízení")
 
         try:
             with Database() as conn:
                 cur = conn.cursor()
-                cur.execute(
-                    "INSERT INTO Transakce (klient_id, datum, popis, doklad_cislo, created_at) VALUES (?,?,?,?, GETDATE())",
-                    (self.klient_id, datum_otevreni, f"Počátek {nr}", f"POC-{nr}"))
-                cur.execute("SELECT SCOPE_IDENTITY()")
-                tid = cur.fetchone()[0]
+                # Vytvoření hlavičky počátečního stavu
+                sql_head = """
+                    SET NOCOUNT ON;
+                    INSERT INTO Transakce (klient_id, datum, popis, doklad_cislo, created_at, is_deleted)
+                    OUTPUT INSERTED.id
+                    VALUES (?, ?, ?, ?, GETDATE(), 0)
+                """
+                cur.execute(sql_head, (self.klient_id, datum_otevreni, f"Počáteční stavy {rok_k_otevreni}", doklad_poc))
+
+                res_id = cur.fetchone()
+                if not res_id:
+                    return "❌ Nepodařilo se vytvořit transakci pro nový rok."
+                tid = int(res_id[0])
+
                 ins = "INSERT INTO UcetniPohyby (transakce_id, klient_id, ucet, smer, castka) VALUES (?,?,?,?,?)"
 
+                # Přenos rozvahových zůstatků
                 for r in rows:
-                    u = r[0];
-                    s = r[1];
-                    val = r[2]
+                    u, s_stary, val = r[0], r[1], float(r[2])
                     # Obracíme strany: Co bylo na D (uzavření), jde na MD (otevření)
-                    if s == 'D':
+                    if s_stary == 'D':
                         cur.execute(ins, (tid, self.klient_id, u, 'MD', val))
                         cur.execute(ins, (tid, self.klient_id, '701', 'D', val))
                     else:
@@ -1226,17 +1260,18 @@ class AccountingEngine:
 
                 # Otevření HV (zisk byl na 702 D, ztráta na 702 MD)
                 if abs(hv) > 0.005:
-                    if hv > 0:  # Zisk -> 431 D
-                        cur.execute(ins, (tid, self.klient_id, '431', 'D', abs(hv)))
-                        cur.execute(ins, (tid, self.klient_id, '701', 'MD', abs(hv)))
-                    else:  # Ztráta -> 431 MD
-                        cur.execute(ins, (tid, self.klient_id, '431', 'MD', abs(hv)))
-                        cur.execute(ins, (tid, self.klient_id, '701', 'D', abs(hv)))
+                    val_hv = abs(float(hv))
+                    if hv > 0:  # Zisk minulého roku -> 431 D
+                        cur.execute(ins, (tid, self.klient_id, '431', 'D', val_hv))
+                        cur.execute(ins, (tid, self.klient_id, '701', 'MD', val_hv))
+                    else:  # Ztráta minulého roku -> 431 MD
+                        cur.execute(ins, (tid, self.klient_id, '431', 'MD', val_hv))
+                        cur.execute(ins, (tid, self.klient_id, '701', 'D', val_hv))
 
                 conn.commit()
-                return f"✅ Otevřeno {nr} (Doklad POC-{nr})."
+                return f"✅ Rok {rok_k_otevreni} úspěšně otevřen! (Doklad {doklad_poc})."
         except Exception as e:
-            return f"Chyba: {e}"
+            return f"❌ Chyba při otevírání roku: {str(e)}"
 
     def get_zakladni_ucty_podle_tridy(self, trida_prefix):
         """Vrátí pouze trojciferné základní účty (např. 501, 511)."""
