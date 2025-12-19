@@ -15,39 +15,39 @@ class AccountingEngine:
         self.opravit_strukturu_rozvrhu()
         self.metoda_zasob = metoda_zasob
 
+
     def get_dashboard_data(self, d_od, d_do):
-        """Načte data pro Finanční dashboard. Vylučuje uzávěrky (UZAV-) a daně (DPPO-)."""
+        """Načte data pro dashboard. Názvy sloupců jsou sjednoceny pro tabulku."""
         sql = """
             SELECT 
-                T.datum as Datum,
-                COALESCE(S.nazev, T.popis) as Subjekt,
-                COALESCE(S.email, 'info@firma.cz') as Email,
-                COALESCE(S.telefon, '-') as Telefon,
+                T.datum as datum,
+                COALESCE(S.nazev, T.popis, 'Neznámý') as subjekt,
+                COALESCE(S.email, '-') as email,
+                COALESCE(S.ico, '-') as ico,
                 CASE 
                     WHEN P.ucet LIKE '311%' THEN 'Pohledávka'
                     WHEN P.ucet LIKE '321%' THEN 'Závazek'
                     ELSE 'Ostatní'
-                END as Typ,
-                CAST(P.castka AS FLOAT) as Castka,
-                T.popis as Popis
+                END as typ,
+                CAST(P.castka AS FLOAT) as castka,
+                T.popis as popis
             FROM Transakce T
             JOIN UcetniPohyby P ON T.id = P.transakce_id
             LEFT JOIN Subjekty S ON T.subjekt_id = S.id
             WHERE T.klient_id = ? 
             AND T.is_deleted = 0
-            -- VYLOUČENÍ VNITŘNÍCH ÚČETNÍCH OPERACÍ --
+            -- Vyloučení uzávěrek a daně z příjmů
             AND T.doklad_cislo NOT LIKE 'UZAV-%'
             AND T.doklad_cislo NOT LIKE 'DPPO-%'
-            ------------------------------------------
             AND T.datum BETWEEN ? AND ?
             AND (P.ucet LIKE '311%' OR P.ucet LIKE '321%')
             ORDER BY T.datum DESC
         """
         try:
-            # execute_query je v tomto souboru importováno z core.database
+            from core.database import execute_query
             return execute_query(sql, (self.klient_id, d_od, d_do))
         except Exception as e:
-            print(f"Finanční dashboard data error: {e}")
+            print(f"SQL Error: {e}")
             return []
 
     def zkontroluj_a_oprav_db(self):

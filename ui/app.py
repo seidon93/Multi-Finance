@@ -30,6 +30,13 @@ if 'metoda_zasob' not in st.session_state:
 engine = AccountingEngine(klient_id=KLIENT_ID)
 metoda_zasob = st.session_state.metoda_zasob
 
+def format_money(x):
+    """Sjednotí formátování peněz v celé aplikaci (např. 1 234 567.89 Kč)."""
+    try:
+        return f"{float(x):,.2f}".replace(",", " ") + " Kč"
+    except:
+        return "0.00 Kč"
+
 # --- KOMPLETNÍ CSS STYLING ---
 st.markdown(
     """
@@ -744,12 +751,12 @@ def zobrazit_reporty():
         bg_hv = "rgba(40, 167, 69, 0.1)" if hv >= 0 else "rgba(220, 53, 69, 0.1)"
         label_hv = "ČISTÝ ZISK" if hv >= 0 else "ZTRÁTA"
 
-        # BANNER VÝSLEDKU
+        # BANNER VÝSLEDKU - Sjednocené formátování přes format_money
         st.markdown(
             f"""
             <div style="background-color: {bg_hv}; padding: 15px; border-radius: 8px; border-left: 5px solid {barva_hv}; text-align: center; margin-bottom: 30px;">
                 <h4 style="margin:0; color: #888;">VÝSLEDEK HOSPODAŘENÍ ({label_hv})</h4>
-                <h1 style="margin:0; color: {barva_hv}; font-size: 2.2em;"> 💵 {hv:,.2f} Kč</h1>
+                <h1 style="margin:0; color: {barva_hv}; font-size: 2.2em;"> 💵 {format_money(hv)}</h1>
             </div>
             """,
             unsafe_allow_html=True
@@ -759,15 +766,19 @@ def zobrazit_reporty():
         st.markdown(
             f"<h3 style='border-bottom: 3px solid #dc3545; padding-bottom: 5px; margin-bottom: 10px;'>Náklady</h3>",
             unsafe_allow_html=True)
-        st.markdown(f"<h1 style='color: #dc3545; margin-top: 0px;'>{data['suma_naklady']:,.2f} Kč</h1>",
+        st.markdown(f"<h1 style='color: #dc3545; margin-top: 0px;'>{format_money(data['suma_naklady'])}</h1>",
                     unsafe_allow_html=True)
 
         if data['naklady']:
             df = pd.DataFrame(data['naklady'])
-            df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
+            # Přejmenování pro přehlednost v tabulce
             df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
-            df = df[['Účet', 'Název', 'Částka']]
-            st.dataframe(df, hide_index=True, width="stretch")
+            st.dataframe(
+                df[['Účet', 'Název', 'Částka']],
+                hide_index=True,
+                width="stretch",
+                column_config={"Částka": st.column_config.NumberColumn("Částka", format="%.2f")}
+            )
         else:
             st.info("Žádné náklady.")
 
@@ -777,15 +788,18 @@ def zobrazit_reporty():
         st.markdown(
             f"<h3 style='border-bottom: 3px solid #28a745; padding-bottom: 5px; margin-bottom: 10px;'>Výnosy</h3>",
             unsafe_allow_html=True)
-        st.markdown(f"<h1 style='color: #28a745; margin-top: 0px;'>{data['suma_vynosy']:,.2f} Kč</h1>",
+        st.markdown(f"<h1 style='color: #28a745; margin-top: 0px;'>{format_money(data['suma_vynosy'])}</h1>",
                     unsafe_allow_html=True)
 
         if data['vynosy']:
             df = pd.DataFrame(data['vynosy'])
-            df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
             df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
-            df = df[['Účet', 'Název', 'Částka']]
-            st.dataframe(df, hide_index=True, width="stretch")
+            st.dataframe(
+                df[['Účet', 'Název', 'Částka']],
+                hide_index=True,
+                width="stretch",
+                column_config={"Částka": st.column_config.NumberColumn("Částka", format="%.2f")}
+            )
         else:
             st.info("Žádné výnosy.")
 
@@ -796,21 +810,11 @@ def zobrazit_reporty():
         rozdil = data['suma_aktiva'] - data['suma_pasiva']
         bilance_ok = abs(rozdil) < 0.02
 
-        # --- LOGIKA BAREV A TEXTU PRO BANNER ---
         if bilance_ok:
-            # Zelený styl (Vše OK)
-            barva_ban = "#28a745"
-            bg_ban = "rgba(40, 167, 69, 0.1)"
-            nadpis_ban = "STAV BILANCE"
-            text_ban = "✅ BILANCE JE VYROVNANÁ"
+            barva_ban, bg_ban, nadpis_ban, text_ban = "#28a745", "rgba(40, 167, 69, 0.1)", "STAV BILANCE", "✅ BILANCE JE VYROVNANÁ"
         else:
-            # Červený styl (Chyba)
-            barva_ban = "#dc3545"
-            bg_ban = "rgba(220, 53, 69, 0.1)"
-            nadpis_ban = "⚠️ NESHODA V BILANCI"
-            text_ban = f"ROZDÍL: {rozdil:,.2f} Kč"
+            barva_ban, bg_ban, nadpis_ban, text_ban = "#dc3545", "rgba(220, 53, 69, 0.1)", "⚠️ NESHODA V BILANCI", f"ROZDÍL: {format_money(rozdil)}"
 
-        # --- HTML BANNER PRO BILANCI ---
         st.markdown(
             f"""
             <div style="background-color: {bg_ban}; padding: 15px; border-radius: 8px; border-left: 5px solid {barva_ban}; text-align: center; margin-bottom: 30px;">
@@ -821,122 +825,64 @@ def zobrazit_reporty():
             unsafe_allow_html=True
         )
 
-        # -----------------------------------------------------
-        # SEKCE 1: AKTIVA (Modrá)
-        # -----------------------------------------------------
-        st.markdown(
-            f"<h3 style='border-bottom: 3px solid #007bff; padding-bottom: 5px; margin-bottom: 10px;'>Aktiva (Majetek)</h3>",
-            unsafe_allow_html=True)
-        st.markdown(f"<h1 style='color: #007bff; margin-top: 0px;'>{data['suma_aktiva']:,.2f} Kč</h1>",
-                    unsafe_allow_html=True)
+        # --- AKTIVA ---
+        st.markdown(f"<h3 style='border-bottom: 3px solid #007bff; padding-bottom: 5px;'>Aktiva (Majetek)</h3>", unsafe_allow_html=True)
+        st.markdown(f"<h1 style='color: #007bff;'>{format_money(data['suma_aktiva'])}</h1>", unsafe_allow_html=True)
 
         if data['aktiva']:
-            df = pd.DataFrame(data['aktiva'])
-            df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
-            df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
-            df_final = df[['Účet', 'Název', 'Částka']]
-
+            df = pd.DataFrame(data['aktiva']).rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
             st.dataframe(
-                df_final,
+                df[['Účet', 'Název', 'Částka']],
                 hide_index=True,
                 width="stretch",
-                column_config={
-                    "Účet": st.column_config.TextColumn("Účet", width="small"),
-                    "Název": st.column_config.TextColumn("Název", width="medium"),
-                    "Částka": st.column_config.TextColumn("Částka", width="small"),
-                }
+                column_config={"Částka": st.column_config.NumberColumn("Částka", format="%.2f")}
             )
-        else:
-            st.info("Žádná aktiva.")
 
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # -----------------------------------------------------
-        # SEKCE 2: PASIVA (Žlutá)
-        # -----------------------------------------------------
-        st.markdown(
-            f"<h3 style='border-bottom: 3px solid #ffc107; padding-bottom: 5px; margin-bottom: 10px;'>Pasiva (Zdroje)</h3>",
-            unsafe_allow_html=True)
-        st.markdown(f"<h1 style='color: #ffc107; margin-top: 0px;'>{data['suma_pasiva']:,.2f} Kč</h1>",
-                    unsafe_allow_html=True)
+        # --- PASIVA ---
+        st.markdown(f"<h3 style='border-bottom: 3px solid #ffc107; padding-bottom: 5px;'>Pasiva (Zdroje)</h3>", unsafe_allow_html=True)
+        st.markdown(f"<h1 style='color: #ffc107;'>{format_money(data['suma_pasiva'])}</h1>", unsafe_allow_html=True)
 
         if data['pasiva']:
-            df = pd.DataFrame(data['pasiva'])
-
-            # FILTR: Odstranění HV z tabulky Pasiv
-            df = df[df['ucet'] != 'HV']
-
-            if not df.empty:
-                df['castka'] = df['castka'].apply(lambda x: f"{x:,.2f}")
-                df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
-                df_final = df[['Účet', 'Název', 'Částka']]
-
-                st.dataframe(
-                    df_final,
-                    hide_index=True,
-                    width="stretch",
-                    column_config={
-                        "Účet": st.column_config.TextColumn("Účet", width="small"),
-                        "Název": st.column_config.TextColumn("Název", width="medium"),
-                        "Částka": st.column_config.TextColumn("Částka", width="small"),
-                    }
-                )
-            else:
-                st.caption("Žádná pasiva (kromě HV).")
-        else:
-            st.caption("Žádná pasiva.")
+            df = pd.DataFrame(data['pasiva'])[lambda x: x['ucet'] != 'HV']
+            df = df.rename(columns={'ucet': 'Účet', 'nazev': 'Název', 'castka': 'Částka'})
+            st.dataframe(
+                df[['Účet', 'Název', 'Částka']],
+                hide_index=True,
+                width="stretch",
+                column_config={"Částka": st.column_config.NumberColumn("Částka", format="%.2f")}
+            )
 
     st.markdown("---")
     st.subheader("🏁 Přehled závěrkových převodů")
 
     with st.expander("Zobrazit detaily uzavření účtů (710 a 702)"):
-        # Import funkce přímo z databázového modulu, pokud by náhodou nebyla v app.py dostupná
         from core.database import execute_query
-
-        # Načtení dat o uzávěrce z Historie
         sql_zaverka = """
-                SELECT P.ucet, R.nazev, P.smer, P.castka, T.doklad_cislo
+                SELECT P.ucet, R.nazev, P.smer, P.castka
                 FROM UcetniPohyby P
                 JOIN Transakce T ON P.transakce_id = T.id
                 LEFT JOIN UctovyRozvrh R ON P.ucet = R.cislo
                 WHERE T.doklad_cislo LIKE 'UZAV-%' AND T.klient_id = ? AND T.is_deleted = 0
                 ORDER BY P.ucet
             """
-
-        # OPRAVA: Voláme přímo execute_query, nikoliv engine.execute_query
         try:
             zaverka_rows = execute_query(sql_zaverka, (KLIENT_ID,))
-        except Exception as e:
-            st.error(f"Chyba při načítání závěrkových dat: {e}")
+        except:
             zaverka_rows = []
 
         if zaverka_rows:
-            df_z = pd.DataFrame([tuple(r) for r in zaverka_rows],
-                                columns=["Účet", "Název", "Směr", "Částka", "Doklad"])
-
+            df_z = pd.DataFrame([tuple(r) for r in zaverka_rows], columns=["Účet", "Název", "Směr", "Částka"])
             c_vys, c_roz = st.columns(2)
 
             with c_vys:
                 st.info("📉 Převod do Výsledovky (710)")
-                # Filtrujeme náklady (5) a výnosy (6)
                 df_710 = df_z[df_z['Účet'].astype(str).str.startswith(('5', '6'))].copy()
-                if not df_710.empty:
-                    df_710['Částka'] = df_710['Částka'].apply(lambda x: f"{float(x):,.2f} Kč".replace(",", " "))
-                    st.dataframe(df_710[["Účet", "Název", "Směr", "Částka"]], hide_index=True, width="stretch")
-                else:
-                    st.caption("Žádné výsledovkové zápisy nenalezeny.")
+                st.dataframe(df_710, hide_index=True, column_config={"Částka": st.column_config.NumberColumn(format="%.2f")})
 
             with c_roz:
                 st.success("⚖️ Převod do Rozvahy (702)")
-                # Filtrujeme rozvahové třídy (0-4)
                 df_702 = df_z[df_z['Účet'].astype(str).str.startswith(('0', '1', '2', '3', '4'))].copy()
-                if not df_702.empty:
-                    df_702['Částka'] = df_702['Částka'].apply(lambda x: f"{float(x):,.2f} Kč".replace(",", " "))
-                    st.dataframe(df_702[["Účet", "Název", "Směr", "Částka"]], hide_index=True, width="stretch")
-                else:
-                    st.caption("Žádné rozvahové zápisy nenalezeny.")
-        else:
-            st.warning("Pro vybrané období nebyla nalezena žádná provedená uzávěrka (doklad UZAV-XXXX).")
+                st.dataframe(df_702, hide_index=True, column_config={"Částka": st.column_config.NumberColumn(format="%.2f")})
 
 
 def zobrazit_prehled_uctu():
@@ -986,19 +932,12 @@ def zobrazit_prehled_uctu():
 
     # 1. NADPIS
     st.header("📊 Hlavní Přehled Účtů")
-
-    # 2. FILTRY (Standardní zobrazení)
     d_od, d_do = time_filter_ui()
 
-    # --- TATO ČÁST MUSÍ BÝT VOLNĚ V KÓDU (Mimo columns!) ---
+    st.markdown('<div style="text-align: center; margin-top: 20px;"><b>Analytika v detailech</b></div>',
+                unsafe_allow_html=True)
+    is_detail = st.toggle("Detailní analytika", value=False, label_visibility="collapsed", key="toggle_center_final")
 
-    # Textový nadpis na středu
-    st.markdown('<div class="analytika-text-wrapper"><span>Analytika v detailech</span></div>', unsafe_allow_html=True)
-
-    # Přepínač na středu
-    is_detail = st.toggle("Detailní analytika", value=False, label_visibility="collapsed", key="toggle_FINAL_CENTER")
-
-    # 3. NAČTENÍ A VÝPIS DAT
     data = engine.get_report_data(d_od, d_do, detailni=is_detail)
 
     if data:
@@ -1008,12 +947,18 @@ def zobrazit_prehled_uctu():
         if vsechny:
             df = pd.DataFrame(vsechny)
             df.columns = ['Účet', 'Název', 'Zůstatek']
-            df['Zůstatek'] = df['Zůstatek'].apply(lambda x: f"{x:,.2f} Kč".replace(",", " ").replace(".", ","))
 
-            st.dataframe(df, width="stretch", hide_index=True)
+            st.dataframe(
+                df,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Zůstatek": st.column_config.NumberColumn("Zůstatek", format="%.2f")
+                }
+            )
 
             hv = data.get('hospodarsky_vysledek', 0.0)
-            st.metric("Průběžný Hospodářský Výsledek (HV)", f"{hv:,.2f} Kč".replace(",", " ").replace(".", ","))
+            st.write(f"### Průběžný hospodářský výsledek (HV): {format_money(hv)}")
 
 
 def zobrazit_prehled_dph():
@@ -1033,14 +978,9 @@ def zobrazit_prehled_dph():
         dph_data_raw = {}
         celkem = Decimal('0.0')
 
-    # --- DEBUG: Ověření pro vás (pokud vidíte 0, filtr funguje) ---
-    # Pokud zadáte rok 2020 a je tu 0, ale v "Tento rok" je číslo, vše funguje.
-    # st.caption(f"DEBUG: Aplikovaný filtr: {date_from} až {date_to}. Celkem nalezeno: {celkem}")
-
     # 3. Informační hlavička
     date_from_str = date_from.strftime('%d.%m.%Y') if date_from else 'Počátek'
     date_to_str = date_to.strftime('%d.%m.%Y') if date_to else 'Současnost'
-
     st.info(f"Přehled DPH za období: **{date_from_str} – {date_to_str}**")
 
     # 4. Tabulka detailů
@@ -1057,17 +997,16 @@ def zobrazit_prehled_dph():
             data = dph_data_raw[sazba]
             ucty_map = dph_ucty_map.get(sazba, {'vstup': '?', 'vystup': '?'})
 
+            # Ponecháme hodnoty jako čísla (Decimal/float) pro st.dataframe
             vstup = data.get('vstup', Decimal('0.0'))
             vystup = data.get('vystup', Decimal('0.0'))
             rozdil = data.get('rozdil', Decimal('0.0'))
 
-            # ZDE BYLA CHYBA: Názvy sloupců musí být statické, účty dáme do závorky hodnoty nebo zvlášť
             detail_data.append({
                 'Sazba': f"{sazba:.0f} %",
-                'DPH Vstup (MD)': f"{vstup:,.2f} Kč".replace(",", " ").replace(".", ","),
-                'DPH Výstup (D)': f"{vystup:,.2f} Kč".replace(",", " ").replace(".", ","),
-                'Rozdíl': f"{rozdil:,.2f} Kč".replace(",", " ").replace(".", ","),
-                # Skryté info o účtech pro tooltip nebo kontrolu (volitelné)
+                'DPH Vstup (MD)': float(vstup),
+                'DPH Výstup (D)': float(vystup),
+                'Rozdíl': float(rozdil),
                 'Účty': f"Vstup: {ucty_map['vstup']} | Výstup: {ucty_map['vystup']}"
             })
 
@@ -1076,38 +1015,34 @@ def zobrazit_prehled_dph():
             st.dataframe(
                 df_detail,
                 hide_index=True,
-                width="stretch",
+                use_container_width=True,
                 column_config={
-                    "Účty": st.column_config.TextColumn("Použité účty", help="Účty použité pro výpočet")
+                    # Sjednocení formátu v tabulce na 2 desetinná místa
+                    "DPH Vstup (MD)": st.column_config.NumberColumn("DPH Vstup (MD)", format="%.2f"),
+                    "DPH Výstup (D)": st.column_config.NumberColumn("DPH Výstup (D)", format="%.2f"),
+                    "Rozdíl": st.column_config.NumberColumn("Rozdíl", format="%.2f"),
+                    "Účty": st.column_config.TextColumn("Použité účty")
                 }
             )
 
     # 5. Celková povinnost (Barevný Box)
     st.subheader("Celková Daňová Povinnost")
 
-    # Logika barev a textů
     if celkem > Decimal('0.005'):
-        typ = "NEDOPLATEK (K ÚHRADĚ)"
-        barva_css = "#dc3545"  # Červená
-        # Nedoplatek je kladný, zobrazujeme tak jak je
-        suma_str = f"{celkem:,.2f} Kč"
+        typ, barva_css, final_val = "NEDOPLATEK (K ÚHRADĚ)", "#dc3545", celkem
     elif celkem < Decimal('-0.005'):
-        typ = "PŘEPLATEK (K VRÁCENÍ)"
-        barva_css = "#28a745"  # Zelená
-        # Přeplatek je záporný, ale chceme zobrazit kladné číslo "Kolik nám vrátí"
-        suma_str = f"{abs(celkem):,.2f} Kč"
+        typ, barva_css, final_val = "PŘEPLATEK (K VRÁCENÍ)", "#28a745", abs(celkem)
     else:
-        typ = "NULOVÁ POVINNOST"
-        barva_css = "#007bff"  # Modrá
-        suma_str = "0,00 Kč"
+        typ, barva_css, final_val = "NULOVÁ POVINNOST", "#007bff", 0.0
 
-    suma_str = suma_str.replace(",", " ").replace(".", ",")
+    # Použití sjednocené funkce format_money
+    suma_str = format_money(final_val)
 
     st.markdown(
         f"""
-        <div class='dph-box' style='border-color: {barva_css}; color: {barva_css};'>
+        <div style='border: 2px solid {barva_css}; color: {barva_css}; padding: 20px; border-radius: 10px; text-align: center;'>
             <h4 style='color: inherit; margin: 0;'>{typ}</h4>
-            <h1 style='color: inherit; margin: 10px 0;'>{suma_str}</h1>
+            <h1 style='color: inherit; margin: 10px 0; font-size: 3em;'>{suma_str}</h1>
         </div>
         """,
         unsafe_allow_html=True
@@ -1356,7 +1291,7 @@ def zobrazit_uzaverku():
         else:
             hruby_zisk_ebt = 0.0
 
-        # Banner pro hrubý zisk
+        # Banner pro hrubý zisk - SJEDNOCENÝ FORMÁT
         if hruby_zisk_ebt >= 0:
             barva_text, barva_bg, popisek, ikona = "#28a745", "rgba(40, 167, 69, 0.15)", "Hrubý zisk", "📈"
         else:
@@ -1365,7 +1300,7 @@ def zobrazit_uzaverku():
         st.markdown(f"""
             <div style="background-color: {barva_bg}; padding: 15px; border-radius: 10px; border: 2px solid {barva_text}; text-align: center; margin-bottom: 25px;">
                 <h4 style="margin:0; color: {barva_text}; opacity: 0.9;">{ikona} {popisek} (před zdaněním)</h4>
-                <h1 style="margin:0; color: {barva_text}; font-size: 3em; font-weight: bold;">{hruby_zisk_ebt:,.2f} Kč</h1>
+                <h1 style="margin:0; color: {barva_text}; font-size: 3em; font-weight: bold;">{format_money(hruby_zisk_ebt)}</h1>
             </div>
         """, unsafe_allow_html=True)
 
@@ -1378,50 +1313,47 @@ def zobrazit_uzaverku():
 
         vypoctena_dan = zaklad_dane * (sazba_dane / 100.0)
 
-        # Výsledek výpočtu
+        # Výsledek výpočtu - SJEDNOCENÝ FORMÁT
         res_color = "#dc3545" if vypoctena_dan > 0 else "#28a745"
         res_text = "SPLATNÉ (K ÚHRADĚ)" if vypoctena_dan > 0 else "BEZ POVINNOSTI"
 
         st.markdown(f"""
             <div style="text-align: center; background-color: rgba(0,0,0,0.2); padding: 10px 15px; border-radius: 8px; border: 1px solid {res_color}; margin-bottom: 20px;">
                 <h5 style="margin:0; color: #888;">Daňová povinnost k úhradě</h5>
-                <h1 style="margin: 5px 0; color: {res_color}; font-size: 2.4em;">{vypoctena_dan:,.2f} Kč</h1>
+                <h1 style="margin: 5px 0; color: {res_color}; font-size: 2.4em;">{format_money(vypoctena_dan)}</h1>
                 <div style="color: {res_color}; font-weight: bold; text-transform: uppercase;">{res_text}</div>
             </div>
         """, unsafe_allow_html=True)
 
-        if st.button("📝 Zaúčtovat daň (591 / 341)", type="primary", width='stretch'):
+        # Opraveno width -> use_container_width
+        if st.button("📝 Zaúčtovat daň (591 / 341)", type="primary", use_container_width=True):
             if vypoctena_dan > 0:
                 res_id = engine.zauctovat_dan_z_prijmu(d_do, vypoctena_dan)
                 if res_id:
-                    st.success(f"✅ Daň {vypoctena_dan:,.2f} Kč byla zaúčtována!")
+                    st.success(f"✅ Daň {format_money(vypoctena_dan)} byla zaúčtována!")
                     st.balloons()
             else:
                 st.warning("Daň je nulová nebo záporná.")
 
     # =========================================================
-    # TAB 2: ROČNÍ ZÁVĚRKA (OPRAVENO PROTI NoneType)
+    # TAB 2: ROČNÍ ZÁVĚRKA
     # =========================================================
     with tabs[1]:
         st.subheader("Konečná roční závěrka (702)")
         rok_uzav = st.number_input("Rok k uzavření", value=dnes.year, step=1, key="rok_uzav_key")
         msg_placeholder = st.empty()
 
-        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary", width='stretch'):
+        if st.button("🚀 Provést KOMPLETNÍ uzávěrku roku", type="primary", use_container_width=True):
             with st.spinner("Pracuji..."):
-                # Volání enginu
                 res = engine.provest_rocn_uzaverku_komplet(rok_uzav)
 
-            # Bezpečná kontrola výsledku
             if res and isinstance(res, str) and "✅" in res:
                 msg_placeholder.success(res)
                 st.balloons()
             elif res and isinstance(res, str):
                 msg_placeholder.error(res)
             else:
-                # Ošetření případu, kdy engine vrátí None
-                msg_placeholder.warning(
-                    "⚠️ Uzávěrka nebyla provedena. Engine nevrátil žádná data (pravděpodobně nulové zůstatky).")
+                msg_placeholder.warning("⚠️ Uzávěrka nebyla provedena. Engine nevrátil žádná data.")
 
     # =========================================================
     # TAB 3: OTEVŘENÍ ROKU
@@ -1430,7 +1362,7 @@ def zobrazit_uzaverku():
         st.subheader("Otevření nového roku (701)")
         rok_k_otevreni = st.number_input("Rok k otevření", value=dnes.year, step=1, key="rok_start_key")
         msg_open = st.empty()
-        if st.button("✨ Otevřít nový rok", width='stretch'):
+        if st.button("✨ Otevřít nový rok", use_container_width=True):
             res_open = engine.otevrit_novy_rok(rok_k_otevreni)
             if res_open and "✅" in res_open:
                 msg_open.success(res_open)
@@ -1445,7 +1377,7 @@ def zobrazit_uzaverku():
         col_lock, col_btn = st.columns([2, 1], vertical_alignment="bottom")
         d_lock = col_lock.date_input("Uzamknout k:", value=aktualni_uzaverka if aktualni_uzaverka else dnes)
 
-        if col_btn.button("🔒 Zamknout", width='stretch'):
+        if col_btn.button("🔒 Zamknout", use_container_width=True):
             engine.set_datum_uzaverky(d_lock)
             st.success(f"Účetnictví bylo uzamčeno k {d_lock.strftime('%d.%m.%Y')}.")
             st.rerun()
@@ -1457,7 +1389,6 @@ def zobrazit_uzaverku():
             st.rerun()
 
 
-# Pomocná funkce pro cachování dat (umístěte ji nad zobrazit_financni_dashboard nebo na začátek souboru)
 @st.cache_data(show_spinner=False)
 def cached_get_data(d_od, d_do):
     return engine.get_dashboard_data(d_od, d_do)
@@ -1486,56 +1417,74 @@ def zobrazit_financni_dashboard():
 
     # --- NOVINKA: FRAGMENT PRO PLYNULOU INTERAKCI ---
     @st.fragment
-    def render_dashboard_content(df):
-        # 2. Interaktivní filtry (Už NEJSOU ve formě, reagují okamžitě, ale lokálně)
+    def render_dashboard_content(df_base):
+        # POJISTKA: Sjednocení názvů sloupců z SQL na malá písmena
+        df_base.columns = ['datum', 'subjekt', 'email', 'ico', 'typ', 'castka', 'popis']
+
+        # 1. INTERAKTIVNÍ FILTRY
         with st.container(border=True):
             st.subheader("⚙️ Upřesnit zobrazení")
             c1, c2, c3 = st.columns([1, 1, 1])
-
             with c1:
-                f_typ = st.multiselect("Typ", options=list(df["Typ"].unique()),
-                                       default=list(df["Typ"].unique()), key="frag_typ")
+                f_typ = st.multiselect("Typ", options=list(df_base["typ"].unique()),
+                                       default=list(df_base["typ"].unique()), key="f_typ_unified_v2")
             with c2:
-                min_c, max_c = float(df["Částka"].min()), float(df["Částka"].max())
-                if min_c == max_c: max_c += 1.0
-                f_range = st.slider("Rozsah částky (Kč)", min_c, max_c, (min_c, max_c), key="frag_slider")
+                min_c = float(df_base["castka"].min())
+                max_c = float(df_base["castka"].max())
+                if min_c == max_c: max_c += 0.01
+                f_range = st.slider("Rozsah (Kč)", min_c, max_c, (min_c, max_c), key="f_slider_unified_v2")
             with c3:
-                f_search = st.text_input("Hledat subjekt/popis", placeholder="Hledat...", key="frag_search")
+                f_search = st.text_input("Hledat subjekt/IČO/popis", key="f_search_unified_v2")
 
-        # Filtrování v paměti
-        mask = (df["Typ"].isin(f_typ)) & (df["Částka"].between(f_range[0], f_range[1]))
+        # 2. FILTRACE
+        mask = (df_base["typ"].isin(f_typ)) & (df_base["castka"].between(f_range[0], f_range[1]))
         if f_search:
-            mask = mask & (df["Subjekt"].str.contains(f_search, case=False) |
-                           df["Popis"].str.contains(f_search, case=False))
+            mask = mask & (df_base["subjekt"].str.contains(f_search, case=False) |
+                           df_base["popis"].str.contains(f_search, case=False) |
+                           df_base["ico"].astype(str).str.contains(f_search))
+        df_f = df_base[mask].copy()
 
-        df_f = df[mask].copy()
+        # 3. METRIKY A BILANCE - JEDNOTNÝ FORMÁT
+        pohl = df_f[df_f["typ"] == "Pohledávka"]["castka"].sum()
+        zav = df_f[df_f["typ"] == "Závazek"]["castka"].sum()
+        bilance = pohl - zav
 
-        # 3. Metriky
-        st.markdown("---")
-        pohl = df_f[df_f["Typ"] == "Pohledávka"]["Částka"].sum()
-        zav = df_f[df_f["Typ"] == "Závazek"]["Částka"].sum()
+        # Pomocná funkce pro sjednocení vzhledu (1 234 567.89 Kč)
+        def fmt(x):
+            return f"{x:,.2f}".replace(",", " ")
 
         m1, m2 = st.columns(2)
-        m1.metric("Pohledávky", f"{pohl:,.2f} Kč")
-        m2.metric("Závazky", f"{zav:,.2f} Kč")
+        m1.metric("Pohledávky", f"{fmt(pohl)} Kč")
+        m2.metric("Závazky", f"{fmt(zav)} Kč")
 
+        # BANNER - Sjednocen s metrikami i tabulkou
         st.markdown(f"""
-            <div style="background-color: rgba(0, 123, 255, 0.1); padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; text-align: center; margin-bottom: 20px;">
-                <h5 style="margin:0; color: #007bff; opacity: 0.8;">AKTUÁLNÍ FINANČNÍ BILANCE </h5>
-                <h1 style="margin:0; color: #007bff; font-weight: bold;">{(pohl - zav):,.2f} Kč</h1>
-            </div>
-        """, unsafe_allow_html=True)
+                <div style="background-color: rgba(0, 123, 255, 0.1); padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; text-align: center; margin-bottom: 20px;">
+                    <h5 style="margin:0; color: #007bff; opacity: 0.8;">AKTUÁLNÍ FINANČNÍ BILANCE</h5>
+                    <h1 style="margin:0; color: #007bff; font-weight: bold;">{fmt(bilance)} Kč</h1>
+                </div>
+            """, unsafe_allow_html=True)
 
-        # 4. Tabulka
+        # 4. TABULKA - Sjednocena s banerem
         def color_typ(row):
-            if row['Typ'] == 'Pohledávka':
+            if row['typ'] == 'Pohledávka':
                 return ['color: #28a745; font-weight: bold'] * len(row)
-            elif row['Typ'] == 'Závazek':
+            elif row['typ'] == 'Závazek':
                 return ['color: #dc3545; font-weight: bold'] * len(row)
             return ['color: #007bff; font-weight: bold'] * len(row)
 
-        st.dataframe(df_f.style.apply(color_typ, axis=1), width='stretch', hide_index=True)
-
+        st.dataframe(
+            df_f.style.apply(color_typ, axis=1),
+            use_container_width=True, hide_index=True,
+            column_config={
+                # Formátování "%.2f" v tabulce zajistí shodu s fmt(x)
+                "castka": st.column_config.NumberColumn("Částka (Kč)", format="%.2f"),
+                "ico": st.column_config.TextColumn("IČO"),
+                "subjekt": st.column_config.TextColumn("Subjekt"),
+                "email": st.column_config.LinkColumn("Email"),
+                "datum": st.column_config.DateColumn("Datum")
+            }
+        )
     # Zavoláme fragment
     render_dashboard_content(df_base)
 
