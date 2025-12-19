@@ -145,6 +145,25 @@ st.markdown(
         .main-header-container { margin-top: 0; text-align: center; }
         .main-header-title { font-size: 1.6rem !important; }
     }
+    
+ 
+    /* Úprava pro filtry - návrat k 2 sloupcům a standardním mezerám */
+    .filter-grid [data-testid="stHorizontalBlock"] {
+        gap: 1.5rem !important; /* Širší mezera mezi dvěma sloupci */
+        margin-bottom: 0.5rem;
+    }
+    
+    .filter-grid button {
+        height: 45px !important; /* Vyšší tlačítka jako na obrázku */
+        font-weight: 500;
+    }
+
+    /* Vodorovný proužek pod celým filtrem */
+    .filter-divider {
+        border-top: 1px solid #333;
+        margin-top: 20px;
+        margin-bottom: 10px;
+    }
     </style>
     """,
     unsafe_allow_html=True
@@ -348,110 +367,77 @@ def formular_nova_transakce():
 
 
 def time_filter_ui():
-    """Vykreslí tlačítka a výběr rozmezí včetně ČTVRTLETÍ."""
+    """Vykreslí filtry přesně podle obrázku (2 sloupce, Reset dole)."""
 
-    st.subheader("Filtrování časového rozmezí")
+    st.subheader("🔍 Filtrování časového rozmezí")
 
     dnes = date.today()
     aktualni_rok = dnes.year
 
-    # Uložení stavu vybraných dat do session state
     if 'filter_date_from' not in st.session_state:
         st.session_state['filter_date_from'] = None
     if 'filter_date_to' not in st.session_state:
         st.session_state['filter_date_to'] = None
 
-    # --- Pomocná funkce pro nastavení a reload ---
     def set_dates(d_from, d_to):
         st.session_state['filter_date_from'] = d_from
         st.session_state['filter_date_to'] = d_to
         st.rerun()
 
-    # --- Pomocné výpočty dat ---
-    def get_start_of_week(d):
-        return d - timedelta(days=d.weekday())
-
-    def get_start_of_month(d):
-        return d.replace(day=1)
-
-    # Funkce pro konec měsíce
-    def get_end_of_month(d):
-        # První den dalšího měsíce - 1 den
-        next_month = d.replace(day=28) + timedelta(days=4)
-        return next_month - timedelta(days=next_month.day)
-
-    def get_start_of_year(d):
-        return d.replace(month=1, day=1)
-
-    def get_end_of_year(d):
-        return d.replace(month=12, day=31)
-
-    # --- KONTEJNER PRO FILTRY ---
+    # --- KONTEJNER S BORDEREM ---
     with st.container(border=True):
+        st.markdown('<div class="filter-grid">', unsafe_allow_html=True)
 
-        # Řádek 1: Základní rychlá volba
-        c1, c2, c3, c4 = st.columns(4)
+        # 1. Řada: Dnes a Tento týden
+        c1, c2 = st.columns(2)
+        if c1.button("Dnes", use_container_width=True): set_dates(dnes, dnes)
+        if c2.button("Tento týden", use_container_width=True):
+            start = dnes - timedelta(days=dnes.weekday())
+            set_dates(start, start + timedelta(days=6))
 
-        if c1.button("Dnes", width="stretch"):
-            set_dates(dnes, dnes)
+        # 2. Řada: Tento měsíc a Tento rok
+        c3, c4 = st.columns(2)
+        if c3.button("Tento měsíc", use_container_width=True):
+            start_m = dnes.replace(day=1)
+            # Logika pro poslední den měsíce
+            next_m = dnes.replace(day=28) + timedelta(days=4)
+            end_m = next_m - timedelta(days=next_m.day)
+            set_dates(start_m, end_m)
+        if c4.button("Tento rok", use_container_width=True):
+            set_dates(date(aktualni_rok, 1, 1), date(aktualni_rok, 12, 31))
 
-        if c2.button("Tento týden", width="stretch"):
-            start_week = get_start_of_week(dnes)
-            end_week = start_week + timedelta(days=6)
-            set_dates(start_week, end_week)
-
-        if c3.button("Tento měsíc", width="stretch"):
-            start_month = get_start_of_month(dnes)
-            end_month = get_end_of_month(dnes)
-            set_dates(start_month, end_month)
-
-        if c4.button("Tento rok", width="stretch"):
-            set_dates(get_start_of_year(dnes), get_end_of_year(dnes))
-
-        # --- NOVÉ: Řádek 2: Čtvrtletí ---
-        q1, q2, q3, q4 = st.columns(4)
-
-        # 1. Čtvrtletí (leden - březen)
-        if q1.button("1. Čtvrtletí (Q1)", width="stretch"):
+        # 3. Řada: Q1 a Q2
+        q1, q2 = st.columns(2)
+        if q1.button("Čtvrtletí (Q1)", use_container_width=True):
             set_dates(date(aktualni_rok, 1, 1), date(aktualni_rok, 3, 31))
-
-        # 2. Čtvrtletí (duben - červen)
-        if q2.button("2. Čtvrtletí (Q2)", width="stretch"):
+        if q2.button("Čtvrtletí (Q2)", use_container_width=True):
             set_dates(date(aktualni_rok, 4, 1), date(aktualni_rok, 6, 30))
 
-        # 3. Čtvrtletí (červenec - září)
-        if q3.button("3. Čtvrtletí (Q3)", width="stretch"):
+        # 4. Řada: Q3 a Q4
+        q3, q4 = st.columns(2)
+        if q3.button("Čtvrtletí (Q3)", use_container_width=True):
             set_dates(date(aktualni_rok, 7, 1), date(aktualni_rok, 9, 30))
-
-        # 4. Čtvrtletí (říjen - prosinec)
-        if q4.button("4. Čtvrtletí (Q4)", width="stretch"):
+        if q4.button("Čtvrtletí (Q4)", use_container_width=True):
             set_dates(date(aktualni_rok, 10, 1), date(aktualni_rok, 12, 31))
 
-        # Řádek 3: Ruční výběr a Reset
-        col_from, col_to, col_reset = st.columns([1.2, 1.2, 0.7], vertical_alignment="bottom")
+        # 5. Řada: Ruční výběr dat (Vedle sebe)
+        f1, f2 = st.columns(2)
+        new_date_from = f1.date_input("Datum OD", value=st.session_state['filter_date_from'], key='picker_from')
+        new_date_to = f2.date_input("Datum DO", value=st.session_state['filter_date_to'], key='picker_to')
 
-        new_date_from = col_from.date_input(
-            "Datum OD",
-            value=st.session_state['filter_date_from'],
-            key='picker_from'
-        )
-
-        new_date_to = col_to.date_input(
-            "Datum DO",
-            value=st.session_state['filter_date_to'],
-            key='picker_to'
-        )
-
-        if col_reset.button("Reset filtrů", type="primary", width="stretch"):
+        # 6. Řada: Reset filtrů přes celou šířku (Typ Primary = Červené)
+        if st.button("Reset filtrů", type="primary", use_container_width=True):
             set_dates(None, None)
 
-        # Logika aktualizace při ruční změně
-        if new_date_from != st.session_state['filter_date_from'] or new_date_to != st.session_state['filter_date_to']:
-            st.session_state['filter_date_from'] = new_date_from
-            st.session_state['filter_date_to'] = new_date_to
-            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        return st.session_state['filter_date_from'], st.session_state['filter_date_to']
+    # Detekce ruční změny v kalendáři
+    if new_date_from != st.session_state['filter_date_from'] or new_date_to != st.session_state['filter_date_to']:
+        st.session_state['filter_date_from'] = new_date_from
+        st.session_state['filter_date_to'] = new_date_to
+        st.rerun()
+
+    return st.session_state['filter_date_from'], st.session_state['filter_date_to']
 
 
 def zobrazit_reporty():
