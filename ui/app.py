@@ -278,13 +278,11 @@ def formular_nova_transakce():
         st.header("Vytvořit Novou Transakci")
 
         # --- 1. HLAVIČKA DOKLADU ---
-        c1, c2, c3 = st.columns([2, 1, 1])  # Přidán třetí sloupec pro splatnost
+        c1, c2, c3 = st.columns([2, 1, 1])
         default_doklad = f"FP-{KLIENT_ID}-{date.today().strftime('%Y%m%d')}"
 
         doklad_cislo = c1.text_input("Číslo Dokladu", value=default_doklad)
         datum_transakce = c2.date_input("Datum Transakce", value=date.today())
-
-        # PŘIDÁNO: Datum splatnosti (výchozí nastaveno na +14 dní od data transakce)
         datum_splatnosti = c3.date_input("Datum Splatnosti", value=datum_transakce + timedelta(days=14))
 
         popis = st.text_area("Popis", placeholder="Popis účetní operace...")
@@ -306,6 +304,8 @@ def formular_nova_transakce():
             st.subheader("MD (Má Dáti)")
             if manualni_rezim:
                 ucet_md_zaklad = st.text_input("Číslo účtu MD", placeholder="např. 518.001", key="md_man")
+                # PŘIDÁNO: Možnost zadat vlastní název pro nový účet
+                ucet_md_nazev = st.text_input("Název účtu MD", placeholder="Vlastní název účtu...", key="md_name_man")
             else:
                 trida_md_sel = st.selectbox("Třída", tridy_uctu, key="t_md")
                 prefix_md = trida_md_sel.split(" - ")[0]
@@ -323,12 +323,15 @@ def formular_nova_transakce():
                         ucet_md_zaklad = cislo_zaklad_md
                 else:
                     ucet_md_zaklad = None
+                ucet_md_nazev = "Nový účet MD" # Defaultní fallback
 
         # --- LOGIKA PRO D (Dal) ---
         with c_dal:
             st.subheader("D (Dal)")
             if manualni_rezim:
                 ucet_dal_zaklad = st.text_input("Číslo účtu D", placeholder="např. 321", key="dal_man")
+                # PŘIDÁNO: Možnost zadat vlastní název pro nový účet
+                ucet_dal_nazev = st.text_input("Název účtu D", placeholder="Vlastní název účtu...", key="dal_name_man")
             else:
                 trida_d_sel = st.selectbox("Třída", tridy_uctu, index=2, key="t_d")
                 prefix_d = trida_d_sel.split(" - ")[0]
@@ -346,6 +349,7 @@ def formular_nova_transakce():
                         ucet_dal_zaklad = cislo_zaklad_d
                 else:
                     ucet_dal_zaklad = None
+                ucet_dal_nazev = "Nový účet D" # Defaultní fallback
 
         # --- ČÁSTKA A ZBYTEK ---
         st.markdown("---")
@@ -354,7 +358,6 @@ def formular_nova_transakce():
         castka_bez_dph = parse_input_money(raw_castka)
 
         if castka_bez_dph > 0:
-            # Sjednocené formátování v metrice (funkce format_money)
             col_prev.metric("K zaúčtování", format_money(castka_bez_dph))
 
         c_dph1, c_dph2 = st.columns(2)
@@ -373,13 +376,13 @@ def formular_nova_transakce():
             else:
                 try:
                     if manualni_rezim:
-                        engine.zajisti_existenci_uctu(ucet_md_zaklad, "Ručně vytvořený účet")
-                        engine.zajisti_existenci_uctu(ucet_dal_zaklad, "Ručně vytvořený účet")
+                        # Nyní se do DB posílá i vámi zadaný název
+                        engine.zajisti_existenci_uctu(ucet_md_zaklad, ucet_md_nazev)
+                        engine.zajisti_existenci_uctu(ucet_dal_zaklad, ucet_dal_nazev)
 
-                    # PŘIDÁNO: datum_splatnosti se posílá do engine.save_transakce
                     tid = engine.save_transakce(
                         datum=datum_transakce,
-                        datum_splatnosti=datum_splatnosti,  # Nový argument
+                        datum_splatnosti=datum_splatnosti,
                         popis=popis,
                         doklad_cislo=doklad_cislo,
                         ucet_md_zaklad=ucet_md_zaklad,
