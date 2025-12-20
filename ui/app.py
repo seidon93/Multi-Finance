@@ -1045,7 +1045,8 @@ def zobrazit_historii_uctu():
 
         # SQL parametry
         sql_base = """
-            SELECT T.id, T.datum, T.datum_splatnosti, T.doklad_cislo, T.popis, SUM(P.castka) as Objem
+            SELECT T.id, T.datum, T.datum_splatnosti, T.doklad_cislo, T.popis, 
+                   SUM(CASE WHEN P.smer = 'MD' THEN P.castka ELSE 0 END) as Objem
             FROM Transakce T
             JOIN UcetniPohyby P ON T.id = P.transakce_id
             WHERE T.klient_id = ? AND T.is_deleted = 0
@@ -1195,7 +1196,14 @@ def zobrazit_historii_uctu():
     # --- TAB 2: KOŠ (Původní logika) ---
     with tab2:
         st.subheader("📦 Archiv smazaných transakcí")
-        sql_del = "SELECT T.id, T.datum, T.datum_splatnosti, T.doklad_cislo, T.popis, SUM(P.castka) FROM Transakce T JOIN UcetniPohyby P ON T.id = P.transakce_id WHERE T.klient_id = ? AND T.is_deleted = 1 GROUP BY T.id, T.datum, T.datum_splatnosti, T.doklad_cislo, T.popis"
+        sql_del = """
+            SELECT T.id, T.datum, T.datum_splatnosti, T.doklad_cislo, T.popis, 
+                   SUM(CASE WHEN P.smer = 'MD' THEN P.castka ELSE 0 END) 
+            FROM Transakce T 
+            JOIN UcetniPohyby P ON T.id = P.transakce_id 
+            WHERE T.klient_id = ? AND T.is_deleted = 1 
+            GROUP BY T.id, T.datum, T.datum_splatnosti, T.doklad_cislo, T.popis"""
+
         del_rows = execute_query(sql_del, (KLIENT_ID,))
 
         if del_rows:
