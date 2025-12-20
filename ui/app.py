@@ -1610,52 +1610,70 @@ def zobrazit_trend_financi(d_od, d_do):
     st.subheader("📈 Vývoj příjmů a výdajů v čase")
     data = engine.get_income_expense_trend(d_od, d_do)
 
+
     if not data:
         st.info("Pro vybrané období nejsou k dispozici žádná data pro graf.")
         return
 
     try:
+        # Vytvoření DataFrame
         df = pd.DataFrame(data, columns=['Měsíc', 'Příjmy', 'Výdaje'])
+        df['Saldo'] = df['Příjmy'] - df['Výdaje']
+
+        # --- ZÍSKÁNÍ DAT O AKTUÁLNÍM (POSLEDNÍM) MĚSÍCI ---
+        # Najdeme nejnovější měsíc v datech (poslední řádek)
+        posledni_radek = df.iloc[-1]
+        aktualni_mesic_nazev = posledni_radek['Měsíc']
+        aktualni_mesic_saldo = posledni_radek['Saldo']
+        celkove_saldo_obdobi = df['Saldo'].sum()
+
+        # Barva pro text salda aktuálního měsíce
+        barva_text_mesic = "#28a745" if aktualni_mesic_saldo >= 0 else "#dc3545"
+
+        # Výpis informací pod nadpis (Saldo za aktuální měsíc a celkové saldo)
+
 
         # 1. HLAVNÍ GRAF (Příjmy vs Výdaje) - Streamlit bar_chart
         st.bar_chart(df.set_index('Měsíc')[['Příjmy', 'Výdaje']], stack=False, color=["#28a745", "#dc3545"])
 
-        # 2. GRAF SALDA (Plotly) s odstraněným ohraničením sloupců i grafu
-        df['Saldo'] = df['Příjmy'] - df['Výdaje']
-        celkove_saldo = df['Saldo'].sum()
-
-        st.subheader(f"**Měsíční saldo (Zisk/Ztráta):** Celkem: {format_money(celkove_saldo)}")
+        # 2. GRAF SALDA (Plotly)
+        st.subheader(f"📊 Detailní měsíční saldo")
+        st.markdown(
+            f"Aktuální měsíc ({aktualni_mesic_nazev}): <span style='color:{barva_text_mesic}; font-weight:bold; font-size:1.1em;'>{format_money(aktualni_mesic_saldo)}</span> | "
+            f"Celkové období: **{format_money(celkove_saldo_obdobi)}**",
+            unsafe_allow_html=True
+        )
 
         fig = go.Figure()
 
-        # Přidání sloupců s barvou podle hodnoty a ODSTRANĚNÍM BÍLÝCH LINIÍ (marker_line_width=0)
+        # Přidání sloupců bez bílých okrajů (marker_line_width=0)
         fig.add_trace(go.Bar(
             x=df['Měsíc'],
             y=df['Saldo'],
             marker_color=df['Saldo'].apply(lambda x: "#28a745" if x >= 0 else "#dc3545"),
-            marker_line_width=0,  # Tímto odstraníte bílé okraje okolo sloupců
+            marker_line_width=0,
             name="Saldo"
         ))
 
-        # --- NASTAVENÍ PRO ČISTÝ VZHLED BEZ OBTÁŽENÍ GRAFU ---
+        # Nastavení pro čistý vzhled bez ohraničení a s výraznou nulovou linkou
         fig.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=0, r=0, t=20, b=0),
+            margin=dict(l=0, r=0, t=10, b=0),
             height=300,
             showlegend=False,
             xaxis=dict(
                 showgrid=False,
-                showline=False,  # Vypne čáru osy X
+                showline=False,
                 zeroline=False
             ),
             yaxis=dict(
-                showline=False,  # Vypne čáru osy Y
-                ticks="",        # Odstraní zářezy osy
-                zeroline=True,   # Ponechá pouze nulovou linku
+                showline=False,
+                ticks="",
+                zeroline=True,
                 zerolinewidth=2,
-                zerolinecolor='#C0C0C0',
-                gridcolor='#333'  # Jemná mřížka na pozadí
+                zerolinecolor='#C0C0C0',  # Výrazná nulová linka
+                gridcolor='#333'
             )
         )
 
