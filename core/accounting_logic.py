@@ -1309,3 +1309,36 @@ class AccountingEngine:
             "net_wc": gross_wc - current_liabilities,
             "liquid_wc": sum(v for u, v in zustatky.items() if u.startswith('2'))
         }
+
+    def get_income_expense_trend(self, d_od, d_do):
+        """
+        Vrátí měsíční sumy příjmů (třída 6) a výdajů (třída 5).
+        """
+        # SQL dotaz upravený pro MS SQL Server
+        sql = """
+            SELECT 
+                FORMAT(T.datum, 'yyyy-MM') as mesic,
+                CAST(SUM(CASE WHEN P.ucet LIKE '6%' THEN P.castka ELSE 0 END) AS FLOAT) as prijmy,
+                CAST(SUM(CASE WHEN P.ucet LIKE '5%' THEN P.castka ELSE 0 END) AS FLOAT) as vydaje
+            FROM Transakce T
+            JOIN UcetniPohyby P ON T.id = P.transakce_id
+            WHERE T.is_deleted = 0 
+              AND T.klient_id = ? 
+              AND T.datum BETWEEN ? AND ?
+            GROUP BY FORMAT(T.datum, 'yyyy-MM')
+            ORDER BY mesic ASC
+        """
+        try:
+            results = execute_query(sql, (self.klient_id, d_od, d_do))
+
+            # Zajištění, že vracíme list tuplů (nebo prázdný list),
+            # aby Pandas mohl správně mapovat 3 sloupce.
+            if not results:
+                return []
+
+            # Převedeme výsledek na seznam tuplů, pokud by vracel něco jiného
+            return [tuple(row) for row in results]
+
+        except Exception as e:
+            print(f"Chyba při načítání trendu: {e}")
+            return []

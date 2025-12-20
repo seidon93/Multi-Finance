@@ -1573,7 +1573,8 @@ def zobrazit_financni_dashboard():
 
     if d_do:
         zobrazit_working_capital_sekci(d_do)
-
+        st.divider()
+        zobrazit_trend_financi(d_od, d_do)
         st.divider()
 
     if not d_od or not d_do:
@@ -1601,6 +1602,67 @@ def zobrazit_financni_dashboard():
 
     # 4. VOLÁNÍ VYKRESLOVACÍ FUNKCE (Bez tohoto řádku nic neuvidíte!)
     render_dashboard_content(df_base)
+
+
+import plotly.graph_objects as go
+
+def zobrazit_trend_financi(d_od, d_do):
+    st.subheader("📈 Vývoj příjmů a výdajů v čase")
+    data = engine.get_income_expense_trend(d_od, d_do)
+
+    if not data:
+        st.info("Pro vybrané období nejsou k dispozici žádná data pro graf.")
+        return
+
+    try:
+        df = pd.DataFrame(data, columns=['Měsíc', 'Příjmy', 'Výdaje'])
+
+        # 1. HLAVNÍ GRAF (Příjmy vs Výdaje) - Streamlit bar_chart
+        st.bar_chart(df.set_index('Měsíc')[['Příjmy', 'Výdaje']], stack=False, color=["#28a745", "#dc3545"])
+
+        # 2. GRAF SALDA (Plotly) s odstraněným ohraničením sloupců i grafu
+        df['Saldo'] = df['Příjmy'] - df['Výdaje']
+        celkove_saldo = df['Saldo'].sum()
+
+        st.subheader(f"**Měsíční saldo (Zisk/Ztráta):** Celkem: {format_money(celkove_saldo)}")
+
+        fig = go.Figure()
+
+        # Přidání sloupců s barvou podle hodnoty a ODSTRANĚNÍM BÍLÝCH LINIÍ (marker_line_width=0)
+        fig.add_trace(go.Bar(
+            x=df['Měsíc'],
+            y=df['Saldo'],
+            marker_color=df['Saldo'].apply(lambda x: "#28a745" if x >= 0 else "#dc3545"),
+            marker_line_width=0,  # Tímto odstraníte bílé okraje okolo sloupců
+            name="Saldo"
+        ))
+
+        # --- NASTAVENÍ PRO ČISTÝ VZHLED BEZ OBTÁŽENÍ GRAFU ---
+        fig.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=0, r=0, t=20, b=0),
+            height=300,
+            showlegend=False,
+            xaxis=dict(
+                showgrid=False,
+                showline=False,  # Vypne čáru osy X
+                zeroline=False
+            ),
+            yaxis=dict(
+                showline=False,  # Vypne čáru osy Y
+                ticks="",        # Odstraní zářezy osy
+                zeroline=True,   # Ponechá pouze nulovou linku
+                zerolinewidth=2,
+                zerolinecolor='#C0C0C0',
+                gridcolor='#333'  # Jemná mřížka na pozadí
+            )
+        )
+
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+    except Exception as e:
+        st.error(f"Chyba při vykreslování trendu: {e}")
 
 
 
