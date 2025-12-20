@@ -368,7 +368,7 @@ def formular_nova_transakce():
         st.markdown("<br>", unsafe_allow_html=True)
 
         # --- TLAČÍTKO ULOŽIT ---
-        if st.button("Uložit Transakci", type="primary", use_container_width=True):
+        if st.button("Uložit Transakci", type="primary", width='stretch'):
             if castka_bez_dph <= 0:
                 st.error("Zadejte částku.")
             elif not ucet_md_zaklad or not ucet_dal_zaklad:
@@ -553,7 +553,7 @@ def zobrazit_historii_uctu():
             ids_to_delete = edited_df[edited_df['Smazat'] == True]['ID'].tolist()
             if ids_to_delete:
                 if st.button(f"🗑️ Přesunout {len(ids_to_delete)} záznamů do koše", type="primary",
-                             use_container_width=True):
+                             width='stretch'):
                     for tid in ids_to_delete:
                         execute_query("UPDATE Transakce SET is_deleted = 1 WHERE id = ?", (tid,))
                     st.success("Záznamy byly přesunuty do koše.")
@@ -592,7 +592,7 @@ def zobrazit_historii_uctu():
                             # Sjednocené formátování peněz
                             st.write(f"Celkový objem transakce: **{format_money(detail['objem'])}**")
 
-                            if st.form_submit_button("💾 Uložit změny", type="primary", use_container_width=True):
+                            if st.form_submit_button("💾 Uložit změny", type="primary", width='stretch'):
                                 # Volání opravené funkce upravit_transakci (s 10 parametry dle AccountingEngine)
                                 engine.upravit_transakci(
                                     transakce_id=transakce_id,
@@ -641,7 +641,7 @@ def zobrazit_historii_uctu():
 
             ids_to_restore = ed_del[ed_del['Obnovit'] == True]['ID'].tolist()
             if ids_to_restore:
-                if st.button("♻️ Nahrát zpět vybrané záznamy", key="restore_btn_active", use_container_width=True):
+                if st.button("♻️ Nahrát zpět vybrané záznamy", key="restore_btn_active", width='stretch'):
                     for tid in ids_to_restore:
                         execute_query("UPDATE Transakce SET is_deleted = 0 WHERE id = ?", (tid,))
                     st.success("Záznamy obnoveny.")
@@ -650,7 +650,7 @@ def zobrazit_historii_uctu():
 
             st.divider()
             if st.checkbox("Povolit definitivní odstranění z databáze", key="allow_hard_delete"):
-                if st.button("🔥 NAVŽDY VYMAZAT CELÝ KOŠ", type="primary", use_container_width=True):
+                if st.button("🔥 NAVŽDY VYMAZAT CELÝ KOŠ", type="primary", width='stretch'):
                     execute_query(
                         "DELETE FROM UcetniPohyby WHERE transakce_id IN (SELECT id FROM Transakce WHERE is_deleted = 1)",
                         ())
@@ -1056,8 +1056,13 @@ def zobrazit_historii_uctu():
 
         if metoda == "📅 Podle data transakce":
             sql_base += " AND T.datum >= ? AND T.datum <= ?"
-            params.extend([st.session_state['filter_date_from'].strftime('%Y-%m-%d'),
-                           st.session_state['filter_date_to'].strftime('%Y-%m-%d')])
+
+            # Zajištění, že máme platné datum, než zavoláme .strftime()
+            d_from = st.session_state['filter_date_from'] if st.session_state['filter_date_from'] else date.today()
+            d_to = st.session_state['filter_date_to'] if st.session_state['filter_date_to'] else date.today()
+
+            params.extend([d_from.strftime('%Y-%m-%d'),
+                           d_to.strftime('%Y-%m-%d')])
         elif metoda == "📄 Podle čísla dokladu (Faktury)":
             hledany_text = st.text_input("Zadejte číslo dokladu:", key="search_input_stable")
             if hledany_text:
@@ -1093,7 +1098,7 @@ def zobrazit_historii_uctu():
 
             if ids_to_delete:
                 st.error(f"⚠️ Vybráno {len(ids_to_delete)} záznamů k odstranění.")
-                if st.button(f"🗑️ POTVRDIT SMAZÁNÍ ({len(ids_to_delete)})", type="primary", use_container_width=True):
+                if st.button(f"🗑️ POTVRDIT SMAZÁNÍ ({len(ids_to_delete)})", type="primary", width='stretch'):
                     for tid in ids_to_delete:
                         execute_query("UPDATE Transakce SET is_deleted = 1 WHERE id = ?", (tid,))
                     st.success(f"✅ Přesunuto do koše.")
@@ -1183,7 +1188,7 @@ def zobrazit_historii_uctu():
                         new_smer = st.radio("Typ DPH", ['Neučtovat', 'DPH na VSTUPU (MD)', 'DPH na VÝSTUPU (D)'],
                                             horizontal=True, key=f"esme_{tid}")
 
-                        if st.button("💾 ULOŽIT ZMĚNY", type="primary", use_container_width=True, key=f"ebtn_{tid}"):
+                        if st.button("💾 ULOŽIT ZMĚNY", type="primary", width='stretch', key=f"ebtn_{tid}"):
                             if u_md_naz: engine.zajisti_existenci_uctu(ucet_md_fin, u_md_naz)
                             if u_dal_naz: engine.zajisti_existenci_uctu(ucet_dal_fin, u_dal_naz)
                             engine.upravit_transakci(tid, new_datum, new_splatnost, new_popis, new_doklad, ucet_md_fin,
@@ -1217,7 +1222,7 @@ def zobrazit_historii_uctu():
 
             to_res = ed_del.loc[ed_del["Obnovit"] == True, "ID"].tolist()
             if to_res:
-                if st.button("♻️ NAHRÁT ZPĚT VYBRANÉ", use_container_width=True):
+                if st.button("♻️ NAHRÁT ZPĚT VYBRANÉ", width='stretch'):
                     for tid in to_res: execute_query("UPDATE Transakce SET is_deleted = 0 WHERE id = ?", (tid,))
                     st.rerun()
 
@@ -1225,7 +1230,7 @@ def zobrazit_historii_uctu():
 
             st.markdown("---")
             if st.checkbox("Povolit definitivní odstranění", key="enable_hard_delete"):
-                if st.button("🔥 NAVŽDY VYMAZAT KOŠ", type="primary", use_container_width=True):
+                if st.button("🔥 NAVŽDY VYMAZAT KOŠ", type="primary", width='stretch'):
                     execute_query(
                         "DELETE FROM UcetniPohyby WHERE transakce_id IN (SELECT id FROM Transakce WHERE is_deleted = 1)",
                         ())
@@ -1537,7 +1542,7 @@ def render_dashboard_content(df_base):
 
     st.dataframe(
         df_f.style.apply(style_dashboard_rows, axis=1),
-        use_container_width=True, hide_index=True,
+        width='stretch', hide_index=True,
         column_config={
             "castka": st.column_config.NumberColumn("Částka (Kč)", format="%.2f"),
             "subjekt": st.column_config.TextColumn("Partner"),
@@ -1665,7 +1670,7 @@ def zobrazit_trend_financi(d_od, d_do):
         fig1.update_layout(**shared_layout)
         fig1.update_layout(barmode='group', showlegend=True, bargap=0.2, bargroupgap=0.05,
                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,))
-        st.plotly_chart(fig1, use_container_width=True, config={'displayModeBar': False})
+        st.plotly_chart(fig1, width='stretch', config={'displayModeBar': False})
 
         # --- 2. GRAF SALDA ---
         st.subheader(f"📊 Detailní měsíční saldo")
@@ -1685,8 +1690,8 @@ def zobrazit_trend_financi(d_od, d_do):
             marker_line_width=0
         ))
 
-        fig2.update_layout(**shared_layout)
-        st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
+        fig2.update_layout(**shared_layout, )
+        st.plotly_chart(fig2, width='stretch', config={'displayModeBar': False}, )
 
     except Exception as e:
         st.error(f"Chyba při vykreslování trendu: {e}")
