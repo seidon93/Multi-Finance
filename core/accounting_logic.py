@@ -1293,3 +1293,19 @@ class AccountingEngine:
         except Exception as e:
             print(f"Chyba při načítání analytiky: {e}")
             return []
+
+    def get_working_capital_metrics(self, datum_k):
+        """Vypočítá složky pracovního kapitálu k určitému datu."""
+        zustatky = self.spocti_zustatky(datum_do=datum_k)
+
+        # Gross WC: Třídy 1, 2 a účet 311
+        gross_wc = sum(v for u, v in zustatky.items() if u.startswith(('1', '2', '311')))
+
+        # Krátkodobé závazky: Účty 321, 33x, 34x (pokud jsou v pasivech)
+        current_liabilities = abs(sum(v for u, v in zustatky.items() if u.startswith(('321', '33', '34')) and v < 0))
+
+        return {
+            "gross_wc": gross_wc,
+            "net_wc": gross_wc - current_liabilities,
+            "liquid_wc": sum(v for u, v in zustatky.items() if u.startswith('2'))
+        }

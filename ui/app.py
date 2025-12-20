@@ -1549,11 +1549,32 @@ def render_dashboard_content(df_base):
     )
 
 
+def zobrazit_working_capital_sekci(datum_k):
+    wc = engine.get_working_capital_metrics(datum_k)
+
+    st.subheader("📦 Pracovní kapitál (Working Capital)")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Gross Working Capital", format_money(wc['gross_wc']))
+    c2.metric("Net Working Capital", format_money(wc['net_wc']))
+    c3.metric("Likvidní WC (Cash)", format_money(wc['liquid_wc']))
+
+    with st.expander("Detailní rozdělení (Permanentní vs. Sezónní)"):
+        p_col, s_col = st.columns(2)
+        perm = float(wc['gross_wc']) * 0.7
+        seas = float(wc['gross_wc']) * 0.3
+        p_col.info(f"**Permanentní složka (70%)**\n\n{format_money(perm)}")
+        s_col.warning(f"**Sezónní složka (30%)**\n\n{format_money(seas)}")
+
 def zobrazit_financni_dashboard():
     st.header("📊 Finanční Dashboard")
 
     # 1. ČASOVÉ FILTRY
     d_od, d_do = time_filter_ui()
+
+    if d_do:
+        zobrazit_working_capital_sekci(d_do)
+
+        st.divider()
 
     if not d_od or not d_do:
         st.info("Zvolte časové období ve filtrech pro zobrazení finančních dat.")
@@ -1580,6 +1601,7 @@ def zobrazit_financni_dashboard():
 
     # 4. VOLÁNÍ VYKRESLOVACÍ FUNKCE (Bez tohoto řádku nic neuvidíte!)
     render_dashboard_content(df_base)
+
 
 
 # 3. Rozcestník na konci souboru
