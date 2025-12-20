@@ -1552,10 +1552,10 @@ def render_dashboard_content(df_base):
 def zobrazit_working_capital_sekci(datum_k):
     wc = engine.get_working_capital_metrics(datum_k)
 
-    st.subheader("📦 Pracovní kapitál (Working Capital)")
+    st.subheader("📦 Pracovní kapitál")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Gross Working Capital", format_money(wc['gross_wc']))
-    c2.metric("Net Working Capital", format_money(wc['net_wc']))
+    c1.metric("Hrubý pracovní kapitál", format_money(wc['gross_wc']))
+    c2.metric("Čistý pracovní kapitál", format_money(wc['net_wc']))
     c3.metric("Likvidní WC (Cash)", format_money(wc['liquid_wc']))
 
     with st.expander("Detailní rozdělení (Permanentní vs. Sezónní)"):
