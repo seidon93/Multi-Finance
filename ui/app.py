@@ -1015,94 +1015,6 @@ def zobrazit_prehled_uctu():
             st.write(f"### Průběžný hospodářský výsledek (HV): {format_money(hv)}")
 
 
-def zobrazit_prehled_dph():
-    st.header("Daňová Povinnost DPH")
-
-    # 1. Získání časového filtru
-    date_from, date_to = time_filter_ui()
-    st.markdown("---")
-
-    # 2. Výpočet dat
-    try:
-        dph_data_raw = engine.spocti_prehled_dph(datum_od=date_from, datum_do=date_to)
-        # Bezpečné vyjmutí celkové sumy
-        celkem = dph_data_raw.pop('CELKEM', Decimal('0.0'))
-    except Exception as e:
-        st.error(f"Chyba při výpočtu DPH: {e}")
-        dph_data_raw = {}
-        celkem = Decimal('0.0')
-
-    # 3. Informační hlavička
-    date_from_str = date_from.strftime('%d.%m.%Y') if date_from else 'Počátek'
-    date_to_str = date_to.strftime('%d.%m.%Y') if date_to else 'Současnost'
-    st.info(f"Přehled DPH za období: **{date_from_str} – {date_to_str}**")
-
-    # 4. Tabulka detailů
-    st.subheader("Detailní Přehled po Sazbách")
-
-    if not dph_data_raw:
-        st.warning("V tomto období nejsou žádné pohyby DPH.")
-    else:
-        detail_data = []
-        dph_ucty_map = engine.get_dph_sazby()
-        sorted_sazby = sorted([k for k in dph_data_raw.keys()], reverse=True)
-
-        for sazba in sorted_sazby:
-            data = dph_data_raw[sazba]
-            ucty_map = dph_ucty_map.get(sazba, {'vstup': '?', 'vystup': '?'})
-
-            # Ponecháme hodnoty jako čísla (Decimal/float) pro st.dataframe
-            vstup = data.get('vstup', Decimal('0.0'))
-            vystup = data.get('vystup', Decimal('0.0'))
-            rozdil = data.get('rozdil', Decimal('0.0'))
-
-            detail_data.append({
-                'Sazba': f"{sazba:.0f} %",
-                'DPH Vstup (MD)': float(vstup),
-                'DPH Výstup (D)': float(vystup),
-                'Rozdíl': float(rozdil),
-                'Účty': f"Vstup: {ucty_map['vstup']} | Výstup: {ucty_map['vystup']}"
-            })
-
-        if detail_data:
-            df_detail = pd.DataFrame(detail_data)
-            st.dataframe(
-                df_detail,
-                hide_index=True,
-                width='stretch',
-                column_config={
-                    # Sjednocení formátu v tabulce na 2 desetinná místa
-                    "DPH Vstup (MD)": st.column_config.NumberColumn("DPH Vstup (MD)", format="%.2f"),
-                    "DPH Výstup (D)": st.column_config.NumberColumn("DPH Výstup (D)", format="%.2f"),
-                    "Rozdíl": st.column_config.NumberColumn("Rozdíl", format="%.2f"),
-                    "Účty": st.column_config.TextColumn("Použité účty")
-                }
-            )
-
-    # 5. Celková povinnost (Barevný Box)
-    st.subheader("Celková Daňová Povinnost")
-
-    if celkem > Decimal('0.005'):
-        typ, barva_css, final_val = "NEDOPLATEK (K ÚHRADĚ)", "#dc3545", celkem
-    elif celkem < Decimal('-0.005'):
-        typ, barva_css, final_val = "PŘEPLATEK (K VRÁCENÍ)", "#28a745", abs(celkem)
-    else:
-        typ, barva_css, final_val = "NULOVÁ POVINNOST", "#007bff", 0.0
-
-    # Použití sjednocené funkce format_money
-    suma_str = format_money(final_val)
-
-    st.markdown(
-        f"""
-        <div style='border: 2px solid {barva_css}; color: {barva_css}; padding: 20px; border-radius: 10px; text-align: center;'>
-            <h4 style='color: inherit; margin: 0;'>{typ}</h4>
-            <h1 style='color: inherit; margin: 10px 0; font-size: 3em;'>{suma_str}</h1>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
 def zobrazit_historii_uctu():
     st.header("Historie a Správa Transakcí")
 
@@ -1119,7 +1031,6 @@ def zobrazit_historii_uctu():
 
     # --- TAB 1: AKTIVNÍ ZÁZNAMY ---
     with tab1:
-        st.subheader("🔍 Vyhledat transakce")
         date_from, date_to = time_filter_ui()
 
         metoda = st.radio(
@@ -1334,6 +1245,94 @@ def zobrazit_historii_uctu():
             st.info("Koš je prázdný.")
 
 
+def zobrazit_prehled_dph():
+    st.header("Daňová Povinnost DPH")
+
+    # 1. Získání časového filtru
+    date_from, date_to = time_filter_ui()
+    st.markdown("---")
+
+    # 2. Výpočet dat
+    try:
+        dph_data_raw = engine.spocti_prehled_dph(datum_od=date_from, datum_do=date_to)
+        # Bezpečné vyjmutí celkové sumy
+        celkem = dph_data_raw.pop('CELKEM', Decimal('0.0'))
+    except Exception as e:
+        st.error(f"Chyba při výpočtu DPH: {e}")
+        dph_data_raw = {}
+        celkem = Decimal('0.0')
+
+    # 3. Informační hlavička
+    date_from_str = date_from.strftime('%d.%m.%Y') if date_from else 'Počátek'
+    date_to_str = date_to.strftime('%d.%m.%Y') if date_to else 'Současnost'
+    st.info(f"Přehled DPH za období: **{date_from_str} – {date_to_str}**")
+
+    # 4. Tabulka detailů
+    st.subheader("Detailní Přehled po Sazbách")
+
+    if not dph_data_raw:
+        st.warning("V tomto období nejsou žádné pohyby DPH.")
+    else:
+        detail_data = []
+        dph_ucty_map = engine.get_dph_sazby()
+        sorted_sazby = sorted([k for k in dph_data_raw.keys()], reverse=True)
+
+        for sazba in sorted_sazby:
+            data = dph_data_raw[sazba]
+            ucty_map = dph_ucty_map.get(sazba, {'vstup': '?', 'vystup': '?'})
+
+            # Ponecháme hodnoty jako čísla (Decimal/float) pro st.dataframe
+            vstup = data.get('vstup', Decimal('0.0'))
+            vystup = data.get('vystup', Decimal('0.0'))
+            rozdil = data.get('rozdil', Decimal('0.0'))
+
+            detail_data.append({
+                'Sazba': f"{sazba:.0f} %",
+                'DPH Vstup (MD)': float(vstup),
+                'DPH Výstup (D)': float(vystup),
+                'Rozdíl': float(rozdil),
+                'Účty': f"Vstup: {ucty_map['vstup']} | Výstup: {ucty_map['vystup']}"
+            })
+
+        if detail_data:
+            df_detail = pd.DataFrame(detail_data)
+            st.dataframe(
+                df_detail,
+                hide_index=True,
+                width='stretch',
+                column_config={
+                    # Sjednocení formátu v tabulce na 2 desetinná místa
+                    "DPH Vstup (MD)": st.column_config.NumberColumn("DPH Vstup (MD)", format="%.2f"),
+                    "DPH Výstup (D)": st.column_config.NumberColumn("DPH Výstup (D)", format="%.2f"),
+                    "Rozdíl": st.column_config.NumberColumn("Rozdíl", format="%.2f"),
+                    "Účty": st.column_config.TextColumn("Použité účty")
+                }
+            )
+
+    # 5. Celková povinnost (Barevný Box)
+    st.subheader("Celková Daňová Povinnost")
+
+    if celkem > Decimal('0.005'):
+        typ, barva_css, final_val = "NEDOPLATEK (K ÚHRADĚ)", "#dc3545", celkem
+    elif celkem < Decimal('-0.005'):
+        typ, barva_css, final_val = "PŘEPLATEK (K VRÁCENÍ)", "#28a745", abs(celkem)
+    else:
+        typ, barva_css, final_val = "NULOVÁ POVINNOST", "#007bff", 0.0
+
+    # Použití sjednocené funkce format_money
+    suma_str = format_money(final_val)
+
+    st.markdown(
+        f"""
+        <div style='border: 2px solid {barva_css}; color: {barva_css}; padding: 20px; border-radius: 10px; text-align: center;'>
+            <h4 style='color: inherit; margin: 0;'>{typ}</h4>
+            <h1 style='color: inherit; margin: 10px 0; font-size: 3em;'>{suma_str}</h1>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
 def zobrazit_uzaverku():
     st.header("🔒 Správa Účetních Období & Roční Závěrka")
 
@@ -1479,8 +1478,6 @@ def zobrazit_uzaverku():
 @st.cache_data(show_spinner=False)
 def cached_get_data(d_od, d_do):
     return engine.get_dashboard_data(d_od, d_do)
-
-# --- NOVINKA: FRAGMENT PRO PLYNULOU INTERAKCI ---
 
 
 @st.fragment
