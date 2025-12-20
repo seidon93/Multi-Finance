@@ -1050,6 +1050,7 @@ def zobrazit_historii_uctu():
             FROM Transakce T
             JOIN UcetniPohyby P ON T.id = P.transakce_id
             WHERE T.klient_id = ? AND T.is_deleted = 0
+
         """
         params = [KLIENT_ID]
 
@@ -1202,7 +1203,9 @@ def zobrazit_historii_uctu():
             FROM Transakce T 
             JOIN UcetniPohyby P ON T.id = P.transakce_id 
             WHERE T.klient_id = ? AND T.is_deleted = 1 
-            GROUP BY T.id, T.datum, T.datum_splatnosti, T.doklad_cislo, T.popis"""
+            GROUP BY T.id, T.datum, T.datum_splatnosti, T.doklad_cislo, T.popis
+            ORDER BY T.datum DESC
+            """
 
         del_rows = execute_query(sql_del, (KLIENT_ID,))
 

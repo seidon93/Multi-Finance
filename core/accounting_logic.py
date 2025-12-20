@@ -21,16 +21,16 @@ class AccountingEngine:
         sql = """
             SELECT 
                 T.datum as datum,
-                T.datum_splatnosti as datum_splatnosti, -- 2. sloupec (přidán)
-                COALESCE(S.nazev, '-') as subjekt,       -- 3. sloupec
-                COALESCE(S.email, '-') as email,         -- 4. sloupec
-                COALESCE(S.ico, '-') as ico,             -- 5. sloupec
+                T.datum_splatnosti as datum_splatnosti,
+                COALESCE(S.nazev, '-') as subjekt,
+                COALESCE(S.email, '-') as email,
+                COALESCE(S.ico, '-') as ico, -- Musí se přesně shodovat s klíčem v DataFrame
                 CASE 
                     WHEN P.ucet LIKE '311%' THEN 'Pohledávka'
                     WHEN P.ucet LIKE '321%' THEN 'Závazek'
-                END as typ,                              -- 6. sloupec
-                CAST(P.castka AS FLOAT) as castka,       -- 7. sloupec
-                T.popis as popis                         -- 8. sloupec
+                END as typ,
+                CAST(P.castka AS FLOAT) as castka,
+                T.popis as popis
             FROM Transakce T
             JOIN UcetniPohyby P ON T.id = P.transakce_id
             LEFT JOIN Subjekty S ON T.subjekt_id = S.id
