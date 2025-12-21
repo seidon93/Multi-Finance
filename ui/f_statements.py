@@ -124,49 +124,115 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
 def zobrazit_archiv_vykazu(engine, KLIENT_ID, execute_query):
     st.subheader("📁 Archiv vygenerovaných výkazů")
 
+    # 1. Filtry pro vyhledávání
     c1, c2 = st.columns(2)
-    search_rok = c1.number_input("Rok", value=2025, key="arch_rok_filter")
+    search_rok = c1.number_input("Rok", value=datetime.now().year, key="arch_rok_filter")
     search_typ = c2.selectbox("Typ výkazu", ["Vše", "Rozvaha", "Výsledovka"], key="arch_typ_filter")
 
-    sql_arch = "SELECT id, cislo_dokladu, typ_vykazu, rok, kvartal, datum_vytvoreni, nazev_jednotky FROM VykazyArchiv WHERE klient_id = ? AND rok = ?"
+    # 2. Definice SQL dotazu (přesně 7 sloupců)
+    sql_arch = """
+        SELECT id, cislo_dokladu, typ_vykazu, rok, kvartal, datum_vytvoreni, nazev_jednotky 
+        FROM VykazyArchiv 
+        WHERE klient_id = ? AND rok = ?
+    """
     params = [KLIENT_ID, search_rok]
+
     if search_typ != "Vše":
         sql_arch += " AND typ_vykazu = ?"
         params.append(search_typ)
+
     sql_arch += " ORDER BY datum_vytvoreni DESC"
 
+    # Spuštění dotazu skrze engine
     arch_data = execute_query(sql_arch, tuple(params))
-    if not arch_data:
-        st.info("Žádné výkazy nenalezeny.")
+
+    # 3. Kontrola dat před vytvořením DataFrame (Obrana proti chybě Shape)
+    if not arch_data or not isinstance(arch_data, list):
+        st.info("V archivu nebyly nalezeny žádné záznamy pro vybrané období.")
         return
 
-    df_arch = pd.DataFrame(arch_data, columns=["ID", "Číslo dokladu", "Typ", "Rok", "Kvartál", "Vytvořeno", "Účetní jednotka"])
-    selected_row = st.dataframe(df_arch, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single")
+    # Pokud execute_query vrátí chybu jako string v listu, zachytíme to zde
+    if len(arch_data) > 0 and not isinstance(arch_data[0], (list, tuple)):
+        st.error(f"Chyba databáze: Neočekávaný formát dat. Server vrátil: {arch_data[0]}")
+        return
 
+    # Kontrola počtu sloupců (musí být 7)
+    if len(arch_data) > 0 and len(arch_data[0]) != 7:
+        st.error(f"Nesoulad dat: SQL vrátilo {len(arch_data[0])} sloupců, ale rozhraní očekává 7. Prověřte strukturu tabulky VykazyArchiv.")
+        return
+
+    # 4. Tvorba DataFrame
+    df_arch = pd.DataFrame(
+        arch_data,
+        columns=["ID", "Číslo dokladu", "Typ", "Rok", "Kvartál", "Vytvořeno", "Účetní jednotka"]
+    )
+
+    # 5. Zobrazení tabulky s výběrem
+    st.markdown("### Seznam uložených dokumentů")
+    selected_row = st.dataframe(
+        df_arch,
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single"
+    )
+
+    # --- 6. DETAIL VYBRANÉHO VÝKAZU ---
     if selected_row and len(selected_row.selection.indices) > 0:
         idx = selected_row.selection.indices[0]
-        v_id, v_typ, v_cislo = df_arch.iloc[idx]["ID"], df_arch.iloc[idx]["Typ"], df_arch.iloc[idx]["Číslo dokladu"]
+        v_id = df_arch.iloc[idx]["ID"]
+        v_typ = df_arch.iloc[idx]["Typ"]
+        v_cislo = df_arch.iloc[idx]["Číslo dokladu"]
 
         st.divider()
-        st.subheader(f"📄 Detail: {v_cislo}")
+        st.subheader(f"📄 Detail výkazu: {v_cislo}")
 
-        items_data = execute_query("SELECT kod_polozky, nazev_polozky, zkratka_en, castka_bezne, is_vylouceno FROM VykazyPolozky WHERE vykaz_id = ?", (v_id,))
-        df_items = pd.DataFrame(items_data, columns=["Kód", "Položka", "Zkratka", "Běžné", "Vyloučit"])
+        # Načtení položek konkrétního výkazu
+        sql_items = """
+            SELECT kod_polozky, nazev_polozky, zkratka_en, castka_bezne, is_vylouceno 
+            FROM VykazyPolozky 
+            WHERE vykaz_id = ? 
+            ORDER BY id ASC
+        """
+        items_data = execute_query(sql_items, (v_id,))
 
-        ed_items = st.data_editor(df_items, num_rows="dynamic", use_container_width=True, key=f"edit_arch_{v_id}")
+        if items_data:
+            df_items = pd.DataFrame(items_data, columns=["Kód", "Položka", "Zkratka", "Běžné", "Vyloučit"])
 
-        c_save, c_pdf, c_del = st.columns(3)
-        if c_save.button("💾 Uložit změny", use_container_width=True):
-            for _, row in ed_items.iterrows():
-                execute_query("UPDATE VykazyPolozky SET nazev_polozky=?, zkratka_en=?, castka_bezne=?, is_vylouceno=? WHERE vykaz_id=? AND kod_polozky=?",
-                             (row['Položka'], row['Zkratka'], row['Běžné'], 1 if row['Vyloučit'] else 0, v_id, row['Kód']))
-            st.success("Aktualizováno.")
+            st.info("Zde můžete upravit hodnoty nebo zkratky a změny znovu uložit.")
+            ed_items = st.data_editor(
+                df_items,
+                num_rows="dynamic",
+                use_container_width=True,
+                key=f"edit_arch_{v_id}",
+                column_config={
+                    "Zkratka": st.column_config.SelectboxColumn("Zkratka (EN)", options=["EBITDA", "EBIT", "EBT", "EAT", "REVENUE", "COGS", "-"]),
+                    "Vyloučit": st.column_config.CheckboxColumn("Vyloučit")
+                }
+            )
 
-        if c_pdf.button("🖨️ Exportovat PDF", use_container_width=True):
-            meta = {'nazev_jednotky': df_arch.iloc[idx]["Účetní jednotka"], 'ico_jednotky': "12345678", 'sestaveno_k': df_arch.iloc[idx]["Vytvořeno"].strftime('%d.%m.%Y')}
-            pdf_out = generovat_pdf_vykazu(v_typ, v_cislo, meta, ed_items)
-            st.download_button("📥 STÁHNOUT", pdf_out, f"{v_cislo}.pdf", "application/pdf")
+            # --- 7. AKCE (Uložit, PDF, Smazat) ---
+            c_save, c_pdf, c_del = st.columns(3)
 
-        if c_del.button("🗑️ Smazat", type="secondary", use_container_width=True):
-            execute_query("DELETE FROM VykazyArchiv WHERE id = ?", (v_id,))
-            st.rerun()
+            if c_save.button("💾 Uložit změny", use_container_width=True):
+                for _, row in ed_items.iterrows():
+                    execute_query(
+                        "UPDATE VykazyPolozky SET nazev_polozky=?, zkratka_en=?, castka_bezne=?, is_vylouceno=? WHERE vykaz_id=? AND kod_polozky=?",
+                        (row['Položka'], row['Zkratka'], row['Běžné'], 1 if row['Vyloučit'] else 0, v_id, row['Kód'])
+                    )
+                st.success("Změny byly v archivu aktualizovány.")
+
+            if c_pdf.button("🖨️ Exportovat PDF", use_container_width=True):
+                # Metadata pro PDF
+                metadata = {
+                    'nazev_jednotky': df_arch.iloc[idx]["Účetní jednotka"],
+                    'ico_jednotky': "12345678", # Zde můžete vytáhnout reálné IČO z DB
+                    'sestaveno_k': df_arch.iloc[idx]["Vytvořeno"].strftime('%d.%m.%Y')
+                }
+                pdf_out = generovat_pdf_vykazu(v_typ, v_cislo, metadata, ed_items)
+                st.download_button("📥 STÁHNOUT PDF", pdf_out, f"{v_cislo}.pdf", "application/pdf")
+
+            if c_del.button("🗑️ Smazat z archivu", type="secondary", use_container_width=True):
+                execute_query("DELETE FROM VykazyArchiv WHERE id = ?", (v_id,))
+                st.warning("Výkaz byl odstraněn.")
+                st.rerun()
