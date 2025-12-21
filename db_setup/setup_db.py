@@ -1,5 +1,5 @@
 import os
-from core.database import Database
+from core.database import Database, execute_query
 
 
 def initialize_database():

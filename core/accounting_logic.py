@@ -1342,3 +1342,31 @@ class AccountingEngine:
         except Exception as e:
             print(f"Chyba při načítání trendu: {e}")
             return []
+
+    def get_vykaz_podklady(self, rok, kvartal, typ_vykazu):
+        """Volá SQL proceduru pro výpočet dat z účetních pohybů."""
+        if kvartal:
+            mesic = kvartal * 3
+            den = 31 if mesic in [3, 12] else 30
+            datum_k = f"{rok}-{mesic:02d}-{den}"
+        else:
+            datum_k = f"{rok}-12-31"
+
+        sql = "EXEC sp_GenerovatPodkladVykazu @KlientID=?, @DatumK=?, @TypVykazu=?"
+        return execute_query(sql, (self.klient_id, datum_k, typ_vykazu))
+
+    def ulozit_vykaz_do_archivu(self, typ_vykazu, rok, kvartal, df_polozky, metadata):
+        """Uloží upravený výkaz do archivu (hlavička + položky)."""
+        sql_header = """
+            INSERT INTO VykazyArchiv (klient_id, typ_vykazu, rok, kvartal, sestaveno_k, nazev_jednotky, ico_jednotky)
+            OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        res = execute_query(sql_header, (self.klient_id, typ_vykazu, rok, kvartal,
+                                         metadata['sestaveno_k'], metadata['nazev_jednotky'], metadata['ico_jednotky']))
+        vykaz_id = res[0][0]
+
+        sql_item = "INSERT INTO VykazyPolozky (vykaz_id, kod_polozky, nazev_polozky, zkratka_en, castka_bezne, is_vylouceno) VALUES (?, ?, ?, ?, ?, ?)"
+        for _, row in df_polozky.iterrows():
+            execute_query(sql_item, (vykaz_id, row.get('Kód', ''), row.get('Položka', ''),
+                                     row.get('Zkratka'), row.get('Běžné', 0), 1 if row.get('Vyloučit') else 0))
+        return True
