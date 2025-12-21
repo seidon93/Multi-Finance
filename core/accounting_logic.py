@@ -1355,25 +1355,21 @@ class AccountingEngine:
             return []
 
     # Přidejte parametr 'kvartal' do definice, i když ho uvnitř třeba nepoužijete pro SQL
-    def get_vykaz_podklady(self, klient_id, datum_k, kvartal, typ_vykazu):
+    def get_vykaz_podklady(self, klient_id, datum_k, typ_vykazu):
         """
-        Získá podklady pro výkazy (Rozvaha, Výsledovka, CF).
-        Sjednoceno na 4 parametry pro kompatibilitu s voláním z f_statements.py.
+        Získá podklady pro výkazy.
+        Parametr 'kvartal' jsme odstranili, protože SQL procedura
+        si rok a období vypočítá sama z @DatumK.
         """
-        # Pomocná logika pro měsíce, pokud ji procedura vyžaduje
-        if kvartal is None:
-            mesic = 12
-        else:
-            try:
-                mesic = int(kvartal) * 3
-            except:
-                mesic = 12
-
-        # Volání uložené procedury se 3 parametry (dle vaší SQL definice)
+        # SQL procedura sp_GenerovatPodkladVykazu bere 3 parametry
         sql = "{CALL sp_GenerovatPodkladVykazu (?, ?, ?)}"
         params = (klient_id, datum_k, typ_vykazu)
 
-        return self.execute_query(sql, params)
+        try:
+            return self.execute_query(sql, params)
+        except Exception as e:
+            print(f"Chyba SQL: {e}")
+            return []
 
     def ulozit_vykaz_do_archivu(self, typ_vykazu, rok, kvartal, df_polozky, metadata):
         """Uloží vygenerovaný výkaz do archivu (hlavička + položky)."""

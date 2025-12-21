@@ -76,15 +76,13 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
 
     # --- ⚖️ ROZVAHA ---
     with tab_r:
-        if st.button("✨ Generovat data pro Rozvahu", use_container_width=True):
-            # OPRAVA: Musíte poslat KLIENT_ID a datum_k jako u ostatních výkazů!
-            data_a = engine.get_vykaz_podklady(KLIENT_ID, datum_k, kvartal, "Rozvaha_Aktiva")
-            data_p = engine.get_vykaz_podklady(KLIENT_ID, datum_k, kvartal, "Rozvaha_Pasiva")
+        if st.button("✨ Generovat data pro Rozvahu"):
+            # Posíláme pouze 3 hodnoty (včetně self to jsou 4 parametry)
+            data_a = engine.get_vykaz_podklady(KLIENT_ID, datum_k, "Rozvaha_Aktiva")
+            data_p = engine.get_vykaz_podklady(KLIENT_ID, datum_k, "Rozvaha_Pasiva")
 
-            st.session_state['draft_rozvaha_a'] = pd.DataFrame(data_a if data_a else [],
-                                                               columns=["Kód", "Položka", "Běžné"])
-            st.session_state['draft_rozvaha_p'] = pd.DataFrame(data_p if data_p else [],
-                                                               columns=["Kód", "Položka", "Běžné"])
+            st.session_state['draft_rozvaha_a'] = pd.DataFrame(data_a, columns=["Kód", "Položka", "Běžné"])
+            st.session_state['draft_rozvaha_p'] = pd.DataFrame(data_p, columns=["Kód", "Položka", "Běžné"])
             st.session_state['draft_rozvaha_a']['Vyloučit'] = False
             st.session_state['draft_rozvaha_p']['Vyloučit'] = False
 
@@ -128,9 +126,8 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
 
     # --- 📈 VÝSLEDOVKA ---
     with tab_v:
-        if st.button("✨ Generovat Výsledovku", use_container_width=True):
-            # OPRAVA: Parametry pro engine
-            data = engine.get_vykaz_podklady(KLIENT_ID, datum_k, kvartal, "Vysledovka")
+        if st.button("✨ Generovat Výsledovku"):
+            data = engine.get_vykaz_podklady(KLIENT_ID, datum_k, "Vysledovka")
             if data:
                 df_v = pd.DataFrame(data, columns=["Kód", "Položka", "Běžné"])
                 df_v['Zkratka'] = "-"
@@ -152,9 +149,8 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
 
     # --- 💸 CASH FLOW ---
     with tab_cf:
-        if st.button("✨ Generovat návrh CF", use_container_width=True):
-            # OPRAVA: Parametry pro engine
-            data = engine.get_vykaz_podklady(KLIENT_ID, datum_k, kvartal, "CF")
+        if st.button("✨ Generovat návrh CF"):
+            data = engine.get_vykaz_podklady(KLIENT_ID, datum_k, "CF")
             if data:
                 st.session_state['draft_cf'] = pd.DataFrame(data, columns=["Kód", "Položka", "Běžné"])
                 st.session_state['draft_cf']['Vyloučit'] = False
