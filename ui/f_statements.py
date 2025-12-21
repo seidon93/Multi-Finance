@@ -81,44 +81,87 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
         datum_k = c3.date_input("Sestaveno k dni", value=date.today())
 
         c4, c5 = st.columns(2)
-        rok = c4.number_input("Rok", value=2025)
+        rok = c4.number_input("Rok", value=datetime.now().year)
         kvartal = c5.selectbox("Období", [None, 1, 2, 3, 4],
                                format_func=lambda x: "Celý rok" if x is None else f"{x}. kvartál")
 
-    tab_r, tab_v, tab_arch = st.tabs(["⚖️ Rozvaha", "📈 Výsledovka", "📁 Archiv"])
+    # OPRAVA: Chyběla čárka mezi "Cash Flow" a "Archiv", což způsobovalo chybu v UI
+    tab_r, tab_v, tab_cf, tab_arch = st.tabs(["⚖️ Rozvaha", "📈 Výsledovka", "💸 Cash Flow", "📁 Archiv"])
 
+    # --- ROZVAHA ---
     with tab_r:
         if st.button("🔍 Generovat Rozvahu"):
             data = engine.get_vykaz_podklady(rok, kvartal, "Rozvaha")
-            st.session_state['draft_rozvaha'] = pd.DataFrame(data, columns=["Kód", "Položka", "Běžné"])
-            st.session_state['draft_rozvaha']['Vyloučit'] = False
+            if data:
+                st.session_state['draft_rozvaha'] = pd.DataFrame(data, columns=["Kód", "Položka", "Běžné"])
+                st.session_state['draft_rozvaha']['Vyloučit'] = False
+            else:
+                st.warning("Nebyla nalezena žádná data pro Rozvahu.")
 
         if 'draft_rozvaha' in st.session_state:
+            st.markdown("### 🟢 Rozvaha - Aktiva")
             edited_a = st.data_editor(st.session_state['draft_rozvaha'], num_rows="dynamic", key="ed_roz_a")
             if st.button("💾 Archivovat Rozvahu", type="primary"):
                 meta = {'sestaveno_k': datum_k, 'nazev_jednotky': nazev_firmy, 'ico_jednotky': ico_firmy}
                 if engine.ulozit_vykaz_do_archivu("Rozvaha", rok, kvartal, edited_a, meta):
-                    st.success("Rozvaha uložena.")
+                    st.success("Rozvaha byla úspěšně uložena do archivu.")
 
+    # --- VÝSLEDOVKA ---
     with tab_v:
         if st.button("🔍 Generovat Výsledovku"):
             data = engine.get_vykaz_podklady(rok, kvartal, "Vysledovka")
-            st.session_state['draft_vysledovka'] = pd.DataFrame(data, columns=["Kód", "Položka", "Běžné"])
-            st.session_state['draft_vysledovka']['Zkratka'] = "-"
-            st.session_state['draft_vysledovka']['Vyloučit'] = False
+            if data:
+                df_v = pd.DataFrame(data, columns=["Kód", "Položka", "Běžné"])
+                df_v['Zkratka'] = "-"
+                df_v['Vyloučit'] = False
+                st.session_state['draft_vysledovka'] = df_v
+            else:
+                st.warning("Nebyla nalezena žádná data pro Výsledovku.")
 
         if 'draft_vysledovka' in st.session_state:
+            st.markdown("### 📈 Výkaz zisku a ztráty")
             edited_v = st.data_editor(
                 st.session_state['draft_vysledovka'],
                 num_rows="dynamic",
-                column_config={"Zkratka": st.column_config.SelectboxColumn("Zkratka (EN)", options=["EBITDA", "EBIT", "EBT", "EAT", "REVENUE", "COGS", "-"])}
+                column_config={
+                    "Zkratka": st.column_config.SelectboxColumn(
+                        "Zkratka (EN)",
+                        options=["EBITDA", "EBIT", "EBT", "EAT", "REVENUE", "COGS", "-"]
+                    )
+                },
+                key="ed_vys_v"
             )
             if st.button("💾 Archivovat Výsledovku", type="primary"):
                 meta = {'sestaveno_k': datum_k, 'nazev_jednotky': nazev_firmy, 'ico_jednotky': ico_firmy}
                 if engine.ulozit_vykaz_do_archivu("Vysledovka", rok, kvartal, edited_v, meta):
-                    st.success("Výsledovka uložena.")
+                    st.success("Výsledovka byla úspěšně uložena do archivu.")
 
+    # --- CASH FLOW (CF) ---
+    with tab_cf:
+        st.subheader("💸 Přehled o peněžních tocích")
+        if st.button("🔍 Generovat automatický návrh CF"):
+            data = engine.get_vykaz_podklady(rok, kvartal, "CF")
+            if data:
+                st.session_state['draft_cf'] = pd.DataFrame(data, columns=["Kód", "Položka", "Běžné"])
+                st.session_state['draft_cf']['Vyloučit'] = False
+            else:
+                st.warning("Pro toto období nebyla nalezena žádná data pro CF.")
+
+        if 'draft_cf' in st.session_state:
+            edited_cf = st.data_editor(
+                st.session_state['draft_cf'],
+                num_rows="dynamic",
+                use_container_width=True,
+                key="ed_cf_editor"
+            )
+            if st.button("💾 Archivovat Cash Flow", type="primary"):
+                meta = {'sestaveno_k': datum_k, 'nazev_jednotky': nazev_firmy, 'ico_jednotky': ico_firmy}
+                if engine.ulozit_vykaz_do_archivu("CF", rok, kvartal, edited_cf, meta):
+                    st.success("Výkaz Cash Flow byl uložen do archivu.")
+
+    # --- ARCHIV ---
     with tab_arch:
+        # Volání funkce archivu se všemi potřebnými argumenty
         zobrazit_archiv_vykazu(engine, KLIENT_ID, execute_query)
 
 def zobrazit_archiv_vykazu(engine, KLIENT_ID, execute_query):
