@@ -191,19 +191,20 @@ def zobrazit_archiv_vykazu(engine, KLIENT_ID, execute_query):
         return
 
     # Zobrazení přehledové tabulky
-    st.markdown("### Seznam uložených dokumentů")
     selected_row = st.dataframe(
         df_arch,
         use_container_width=True,
         hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row"
+        selection_mode="single-row",
+        on_select="rerun"
     )
 
     # --- DETAIL VYBRANÉHO VÝKAZU ---
-    # OPRAVA: Místo .indices používáme .rows
+    # Kontrola výběru pomocí .rows
     if selected_row and len(selected_row.selection.rows) > 0:
         idx = selected_row.selection.rows[0]
+
+        # Načtení dat z DataFrame na základě vybraného indexu
         v_id = df_arch.iloc[idx]["ID"]
         v_typ = df_arch.iloc[idx]["Typ"]
         v_cislo = df_arch.iloc[idx]["Číslo dokladu"]
