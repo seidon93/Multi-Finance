@@ -4,6 +4,7 @@ from decimal import Decimal
 from datetime import date, datetime
 import pandas as pd
 import os
+import streamlit as st
 
 
 class AccountingEngine:
@@ -1354,21 +1355,32 @@ class AccountingEngine:
             print(f"Chyba při načítání trendu: {e}")
             return []
 
-    # Přidejte parametr 'kvartal' do definice, i když ho uvnitř třeba nepoužijete pro SQL
     def get_vykaz_podklady(self, klient_id, datum_k, typ_vykazu):
-        """
-        Získá podklady pro výkazy.
-        Parametr 'kvartal' jsme odstranili, protože SQL procedura
-        si rok a období vypočítá sama z @DatumK.
-        """
-        # SQL procedura sp_GenerovatPodkladVykazu bere 3 parametry
-        sql = "{CALL sp_GenerovatPodkladVykazu (?, ?, ?)}"
-        params = (klient_id, datum_k, typ_vykazu)
-
         try:
-            return self.execute_query(sql, params)
+            # Převedení datumu na stringy
+            datum_k_str = datum_k.strftime('%Y-%m-%d')
+            # Výpočet začátku roku (pro správné rozmezí v SQL proceduře)
+            datum_od_str = f"{datum_k.year}-01-01"
+
+            if typ_vykazu == "Rozvaha_Aktiva":
+                # Voláme proceduru se 4 parametry: ID, OD, DO, SEKCE
+                sql = "{CALL sp_Vykaz_Rozvaha (?, ?, ?, ?)}"
+                params = (klient_id, datum_od_str, datum_k_str, 'Aktiva')
+            elif typ_vykazu == "Rozvaha_Pasiva":
+                sql = "{CALL sp_Vykaz_Rozvaha (?, ?, ?, ?)}"
+                params = (klient_id, datum_od_str, datum_k_str, 'Pasiva')
+            else:
+                return []
+
+            res = self.execute_query(sql, params)
+
+            # LOGOVÁNÍ PRO DEBUG (uvidíte v terminálu/konzoli)
+            print(f"DEBUG SQL CALL: {typ_vykazu} pro KlientID {klient_id}, od {datum_od_str} do {datum_k_str}")
+            print(f"DEBUG RESULT: Vráceno {len(res) if res else 0} řádků")
+
+            return [list(row) for row in res] if res else []
         except Exception as e:
-            print(f"Chyba SQL: {e}")
+            print(f"❌ CHYBA ENGINE: {e}")
             return []
 
     def ulozit_vykaz_do_archivu(self, typ_vykazu, rok, kvartal, df_polozky, metadata):
