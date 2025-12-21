@@ -9,12 +9,24 @@ import os
 class AccountingEngine:
     """Třída pro výpočet účetních dat a reportů."""
 
-    def __init__(self, klient_id, metoda_zasob='B'):
+    def __init__(self, klient_id, execute_query_fn=None, metoda_zasob='B'):
         self.klient_id = klient_id
+
+        # Pokud funkce není předána, zkusíme použít globální (pokud je importována)
+        if execute_query_fn is None:
+            from core.database import execute_query
+            self._execute_query_fn = execute_query
+        else:
+            self._execute_query_fn = execute_query_fn
+
+        # Spuštění údržby DB při startu
         self.zkontroluj_a_oprav_db()
         self.opravit_strukturu_rozvrhu()
         self.metoda_zasob = metoda_zasob
 
+    def execute_query(self, sql, params=()):
+        """Metoda, kterou volají všechny ostatní funkce v této třídě."""
+        return self._execute_query_fn(sql, params)
 
     def get_dashboard_data(self, d_od, d_do):
         """Načte data pro dashboard – musí vracet přesně 8 sloupců."""
@@ -24,7 +36,7 @@ class AccountingEngine:
                 T.datum_splatnosti as datum_splatnosti,
                 COALESCE(S.nazev, '-') as subjekt,
                 COALESCE(S.email, '-') as email,
-                COALESCE(S.ico, '-') as ico, -- Musí se přesně shodovat s klíčem v DataFrame
+                COALESCE(S.ico, '-') as ico,
                 CASE 
                     WHEN P.ucet LIKE '311%' THEN 'Pohledávka'
                     WHEN P.ucet LIKE '321%' THEN 'Závazek'
@@ -41,9 +53,8 @@ class AccountingEngine:
             ORDER BY T.datum DESC
         """
         try:
-            from core.database import execute_query
-            # DŮLEŽITÉ: execute_query musí vrátit seznam řádků
-            return execute_query(sql, (self.klient_id, d_od, d_do))
+            # OPRAVA: Použití vnitřní metody instance místo přímého importu
+            return self.execute_query(sql, (self.klient_id, d_od, d_do))
         except Exception as e:
             print(f"SQL Error: {e}")
             return []
@@ -1343,42 +1354,76 @@ class AccountingEngine:
             print(f"Chyba při načítání trendu: {e}")
             return []
 
-    def get_vykaz_podklady(self, rok, kvartal, typ_vykazu):
-        """Volá SQL proceduru pro výpočet dat z účetních pohybů."""
-        if kvartal:
-            mesic = kvartal * 3
-            den = 31 if mesic in [3, 12] else 30
-            datum_k = f"{rok}-{mesic:02d}-{den}"
+    # Přidejte parametr 'kvartal' do definice, i když ho uvnitř třeba nepoužijete pro SQL
+    def get_vykaz_podklady(self, klient_id, datum_k, kvartal, typ_vykazu):
+        """
+        Získá podklady pro výkazy (Rozvaha, Výsledovka, CF).
+        Sjednoceno na 4 parametry pro kompatibilitu s voláním z f_statements.py.
+        """
+        # Pomocná logika pro měsíce, pokud ji procedura vyžaduje
+        if kvartal is None:
+            mesic = 12
         else:
-            datum_k = f"{rok}-12-31"
+            try:
+                mesic = int(kvartal) * 3
+            except:
+                mesic = 12
 
-        sql = "EXEC sp_GenerovatPodkladVykazu @KlientID=?, @DatumK=?, @TypVykazu=?"
-        return execute_query(sql, (self.klient_id, datum_k, typ_vykazu))
+        # Volání uložené procedury se 3 parametry (dle vaší SQL definice)
+        sql = "{CALL sp_GenerovatPodkladVykazu (?, ?, ?)}"
+        params = (klient_id, datum_k, typ_vykazu)
+
+        return self.execute_query(sql, params)
 
     def ulozit_vykaz_do_archivu(self, typ_vykazu, rok, kvartal, df_polozky, metadata):
-        """Uloží upravený výkaz do archivu (hlavička + položky)."""
+        """Uloží vygenerovaný výkaz do archivu (hlavička + položky)."""
         sql_header = """
             INSERT INTO VykazyArchiv (klient_id, typ_vykazu, rok, kvartal, sestaveno_k, nazev_jednotky, ico_jednotky)
             OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?, ?, ?)
         """
-        res = execute_query(sql_header, (self.klient_id, typ_vykazu, rok, kvartal,
-                                         metadata['sestaveno_k'], metadata['nazev_jednotky'], metadata['ico_jednotky']))
+
+        # Bezpečné získání metadat s výchozími hodnotami
+        h_params = (
+            self.klient_id,
+            typ_vykazu,
+            rok,
+            kvartal,
+            metadata.get('sestaveno_k', date.today()),
+            metadata.get('nazev_jednotky', 'Neznámá jednotka'),
+            metadata.get('ico_jednotky', '0')
+        )
+
+        res = self.execute_query(sql_header, h_params)
+
+        if not res:
+            return False
+
         vykaz_id = res[0][0]
 
-        sql_item = "INSERT INTO VykazyPolozky (vykaz_id, kod_polozky, nazev_polozky, zkratka_en, castka_bezne, is_vylouceno) VALUES (?, ?, ?, ?, ?, ?)"
+        # 2. Uložení položek výkazu
+        sql_item = """
+            INSERT INTO VykazyPolozky (vykaz_id, kod_polozky, nazev_polozky, zkratka_en, castka_bezne, is_vylouceno) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        """
         for _, row in df_polozky.iterrows():
-            execute_query(sql_item, (vykaz_id, row.get('Kód', ''), row.get('Položka', ''),
-                                     row.get('Zkratka'), row.get('Běžné', 0), 1 if row.get('Vyloučit') else 0))
+            self.execute_query(sql_item, (
+                vykaz_id,
+                str(row.get('Kód', '')),
+                str(row.get('Položka', '')),
+                str(row.get('Zkratka', '-')),
+                float(row.get('Běžné', 0)),
+                1 if row.get('Vyloučit') else 0
+            ))
         return True
 
-    def get_klient_info(self):
-        """
-        Načte název a IČO aktuálně vybraného klienta z tabulky Klienti.
-        Slouží pro automatické plnění hlaviček výkazů.
-        """
+    def get_klient_info(self, klient_id):
+        """Načte název a IČO firmy pro hlavičky výkazů."""
         sql = "SELECT nazev_firmy, ico FROM Klienti WHERE id = ?"
-        # Metoda využívá globální funkci execute_query
-        res = execute_query(sql, (self.klient_id,))
-        if res and len(res) > 0:
-            return {"nazev": res[0][0], "ico": res[0][1]}
-        return {"nazev": "Neznámá firma", "ico": "-"}
+        try:
+            res = self.execute_query(sql, (klient_id,))
+            if res and len(res) > 0:
+                return {"nazev": res[0][0], "ico": res[0][1]}
+        except Exception as e:
+            print(f"Chyba get_klient_info: {e}")
+
+        return {"nazev": "Neznámá firma", "ico": "0"}
