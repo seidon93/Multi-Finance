@@ -23,6 +23,8 @@ def generovat_pdf_vykazu(typ, cislo, metadata, df_polozky):
     pdf = FinancialPDF()
     pdf.meta = {**metadata, 'cislo_dokladu': cislo}
     pdf.add_page()
+
+    # Titulek výkazu
     pdf.set_font('helvetica', 'B', 14)
     pdf.cell(0, 10, f"{typ.upper()}", ln=True, align='C')
     pdf.ln(5)
@@ -38,19 +40,34 @@ def generovat_pdf_vykazu(typ, cislo, metadata, df_polozky):
     # Data
     pdf.set_font('helvetica', '', 9)
     for _, row in df_polozky.iterrows():
-        if row.get('Vyloučit'): continue
-        if row.get('Zkratka') in ['EBITDA', 'EBIT', 'EBT', 'EAT']:
+        # 1. Kontrola vyloučení
+        if row.get('Vyloučit'):
+            continue
+
+        # 2. Logika zvýraznění (EBITDA, EBIT...)
+        zkratka = row.get('Zkratka')
+        if zkratka in ['EBITDA', 'EBIT', 'EBT', 'EAT']:
             pdf.set_font('helvetica', 'B', 9)
-            pdf.set_fill_color(230, 240, 255)
+            pdf.set_fill_color(230, 240, 255)  # Lehce modré podbarvení
         else:
             pdf.set_font('helvetica', '', 9)
             pdf.set_fill_color(255, 255, 255)
 
+        # 3. Ošetření None hodnot u částek
+        hodnota = row.get('Běžné', 0)
+        if hodnota is None:
+            hodnota = 0
+
+        # 4. Vykreslení buněk řádku
         pdf.cell(20, 8, str(row.get('Kód', '-')), border=1, fill=True)
         pdf.cell(100, 8, str(row.get('Položka', '-')), border=1, fill=True)
-        pdf.cell(30, 8, str(row.get('Zkratka') if row.get('Zkratka') else "-"), border=1, fill=True)
-        pdf.cell(40, 8, f"{float(row.get('Běžné', 0)):,.2f} Kč".replace(',', ' '), border=1, align='R', fill=True)
+        pdf.cell(30, 8, str(zkratka if zkratka and zkratka != "-" else "-"), border=1, fill=True)
+
+        # Formátování: 1 234 567.89 Kč
+        formatovana_castka = f"{float(hodnota):,.2f}".replace(',', ' ')
+        pdf.cell(40, 8, f"{formatovana_castka} Kč", border=1, align='R', fill=True)
         pdf.ln()
+
     return pdf.output()
 
 def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
