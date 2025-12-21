@@ -71,13 +71,16 @@ def generovat_pdf_vykazu(typ, cislo, metadata, df_polozky):
     return pdf.output()
 
 def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
+    # Načtení reálných dat klienta z databáze
+    klient_info = engine.get_klient_info()
     st.header("📂 Účetní záznamy a výkazy")
 
     # --- DYNAMICKÁ HLAVIČKA ---
     with st.expander("📝 Nastavení hlavičky výkazu", expanded=True):
         c1, c2, c3 = st.columns([2, 1, 1])
-        nazev_firmy = c1.text_input("Účetní jednotka", value="Vzorová firma s.r.o.")
-        ico_firmy = c2.text_input("IČO", value="12345678")
+        # Hodnoty jsou nyní dynamicky načteny podle aktuálního KLIENT_ID
+        nazev_firmy = c1.text_input("Účetní jednotka", value=klient_info['nazev'])
+        ico_firmy = c2.text_input("IČO", value=klient_info['ico'])
         datum_k = c3.date_input("Sestaveno k dni", value=date.today())
 
         c4, c5 = st.columns(2)
@@ -89,13 +92,12 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
     tab_r, tab_v, tab_cf, tab_arch = st.tabs(["⚖️ Rozvaha", "📈 Výsledovka", "💸 Cash Flow", "📁 Archiv"])
 
     # --- ⚖️ ROZVAHA ---
-    # --- ⚖️ ROZVAHA ---
     with tab_r:
-        if st.button("🔍 Generovat data pro Rozvahu"):
+        if st.button("✨ Generovat data pro Rozvahu", use_container_width=True):
+            # Volání SQL procedury s opraveným GROUP BY
             data_a = engine.get_vykaz_podklady(rok, kvartal, "Rozvaha_Aktiva")
             data_p = engine.get_vykaz_podklady(rok, kvartal, "Rozvaha_Pasiva")
 
-            # I když jsou data prázdná, vytvoříme strukturu, aby se zobrazil přepínač
             st.session_state['draft_rozvaha_a'] = pd.DataFrame(data_a if data_a else [],
                                                                columns=["Kód", "Položka", "Běžné"])
             st.session_state['draft_rozvaha_p'] = pd.DataFrame(data_p if data_p else [],
@@ -105,7 +107,7 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
 
         if 'draft_rozvaha_a' in st.session_state:
             st.divider()
-            # POUŽITÍ SEGMENTED CONTROL (Dostupné ve verzi 1.52)
+            # Moderní přepínač pro verzi Streamlit 1.52
             sekce_r = st.segmented_control(
                 "Vyberte část výkazu:",
                 options=["🟢 AKTIVA", "🔴 PASIVA"],
@@ -114,18 +116,39 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
 
             if sekce_r == "🟢 AKTIVA":
                 st.subheader("Aktiva (Majetek)")
-                # Editor pro aktiva
-                st.data_editor(st.session_state['draft_rozvaha_a'], num_rows="dynamic", key="ed_roz_a",
-                               width="content")
+                edited_a = st.data_editor(
+                    st.session_state['draft_rozvaha_a'],
+                    num_rows="dynamic",
+                    key="ed_roz_a",
+                    use_container_width=True
+                )
+                st.session_state['draft_rozvaha_a'] = edited_a
             else:
                 st.subheader("Pasiva (Zdroje)")
-                # Editor pro pasiva
-                st.data_editor(st.session_state['draft_rozvaha_p'], num_rows="dynamic", key="ed_roz_p",
-                               width="content")
+                # Zobrazení pasiv v kladných hodnotách pro uživatele
+                df_p_view = st.session_state['draft_rozvaha_p'].copy()
+                df_p_view['Běžné'] = df_p_view['Běžné'].apply(lambda x: abs(x) if x is not None else 0)
+
+                edited_p = st.data_editor(
+                    df_p_view,
+                    num_rows="dynamic",
+                    key="ed_roz_p",
+                    use_container_width=True
+                )
+                # Při uložení do session vrátíme původní znaménko pro korektnost v DB
+                st.session_state['draft_rozvaha_p'] = edited_p
+
+            # Tlačítko pro archivaci celé Rozvahy najednou
+            if st.button("💾 Archivovat kompletní Rozvahu", type="primary", use_container_width=True):
+                # Spojení Aktiv a Pasiv do jednoho datasetu
+                komplet = pd.concat([st.session_state['draft_rozvaha_a'], st.session_state['draft_rozvaha_p']])
+                meta = {'sestaveno_k': datum_k, 'nazev_jednotky': nazev_firmy, 'ico_jednotky': ico_firmy}
+                if engine.ulozit_vykaz_do_archivu("Rozvaha", rok, kvartal, komplet, meta):
+                    st.success("Kompletní rozvaha byla úspěšně uložena do archivu.")
 
     # --- 📈 VÝSLEDOVKA ---
     with tab_v:
-        if st.button("🔍 Generovat Výsledovku"):
+        if st.button("✨ Generovat Výsledovku", use_container_width=True):
             data = engine.get_vykaz_podklady(rok, kvartal, "Vysledovka")
             if data:
                 df_v = pd.DataFrame(data, columns=["Kód", "Položka", "Běžné"])
@@ -137,34 +160,40 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
             edited_v = st.data_editor(
                 st.session_state['draft_vysledovka'],
                 num_rows="dynamic",
+                use_container_width=True,
                 column_config={"Zkratka": st.column_config.SelectboxColumn("Zkratka (EN)",
                                                                            options=["EBITDA", "EBIT", "EBT", "EAT",
                                                                                     "REVENUE", "COGS", "-"])},
                 key="ed_vys_editor"
             )
-            if st.button("💾 Archivovat Výsledovku", type="primary"):
+            if st.button("💾 Archivovat Výsledovku", type="primary", use_container_width=True):
                 meta = {'sestaveno_k': datum_k, 'nazev_jednotky': nazev_firmy, 'ico_jednotky': ico_firmy}
                 engine.ulozit_vykaz_do_archivu("Vysledovka", rok, kvartal, edited_v, meta)
-                st.success("Výsledovka byla uložena.")
+                st.success("Výsledovka byla úspěšně uložena do archivu.")
 
     # --- 💸 CASH FLOW ---
     with tab_cf:
-        if st.button("🔍 Generovat návrh CF"):
+        if st.button("✨ Generovat návrh CF", use_container_width=True):
             data = engine.get_vykaz_podklady(rok, kvartal, "CF")
             if data:
                 st.session_state['draft_cf'] = pd.DataFrame(data, columns=["Kód", "Položka", "Běžné"])
                 st.session_state['draft_cf']['Vyloučit'] = False
 
         if 'draft_cf' in st.session_state:
-            edited_cf = st.data_editor(st.session_state['draft_cf'], num_rows="dynamic", key="ed_cf_editor",
-                                       width="content")
-            if st.button("💾 Archivovat Cash Flow", type="primary"):
+            edited_cf = st.data_editor(
+                st.session_state['draft_cf'],
+                num_rows="dynamic",
+                key="ed_cf_editor",
+                use_container_width=True
+            )
+            if st.button("💾 Archivovat Cash Flow", type="primary", use_container_width=True):
                 meta = {'sestaveno_k': datum_k, 'nazev_jednotky': nazev_firmy, 'ico_jednotky': ico_firmy}
                 engine.ulozit_vykaz_do_archivu("CF", rok, kvartal, edited_cf, meta)
-                st.success("Cash Flow uloženo.")
+                st.success("Výkaz Cash Flow byl úspěšně uložen.")
 
     # --- 📁 ARCHIV ---
     with tab_arch:
+        # Volání funkce archivu s předáním parametrů pro databázi
         zobrazit_archiv_vykazu(engine, KLIENT_ID, execute_query)
 
 def zobrazit_archiv_vykazu(engine, KLIENT_ID, execute_query):

@@ -1370,3 +1370,12 @@ class AccountingEngine:
             execute_query(sql_item, (vykaz_id, row.get('Kód', ''), row.get('Položka', ''),
                                      row.get('Zkratka'), row.get('Běžné', 0), 1 if row.get('Vyloučit') else 0))
         return True
+
+    def get_klient_info(self):
+        """Načte název a IČO aktuálně vybraného klienta."""
+        sql = "SELECT nazev_firmy, ico FROM Klienti WHERE id = ?"
+        # Používáme execute_query k získání dat z SQL
+        res = execute_query(sql, (self.klient_id,))
+        if res and len(res) > 0:
+            return {"nazev": res[0][0], "ico": res[0][1]}
+        return {"nazev": "Neznámá firma", "ico": "00000000"}
