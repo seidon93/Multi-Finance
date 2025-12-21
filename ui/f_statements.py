@@ -4,7 +4,6 @@ from datetime import date, datetime
 from fpdf import FPDF
 
 
-# Třída pro PDF zůstává stejná
 class FinancialPDF(FPDF):
     def header(self):
         self.set_font('helvetica', 'B', 12)
@@ -57,9 +56,7 @@ def generovat_pdf_vykazu(typ, cislo, metadata, df_polozky):
 
 
 def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
-    # Dynamické načtení vaší firmy a IČO
     klient_info = engine.get_klient_info()
-
     st.header("📂 Účetní záznamy a výkazy")
 
     with st.expander("📝 Nastavení hlavičky výkazu", expanded=True):
@@ -98,11 +95,23 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
                                                                      use_container_width=True)
             else:
                 st.subheader("Pasiva (Zdroje)")
-                # Oprava zobrazení pasiv (abs hodnota)
                 df_p_view = st.session_state['draft_rozvaha_p'].copy()
                 df_p_view['Běžné'] = df_p_view['Běžné'].apply(lambda x: abs(x) if x is not None else 0)
                 st.session_state['draft_rozvaha_p'] = st.data_editor(df_p_view, num_rows="dynamic", key="ed_roz_p",
                                                                      use_container_width=True)
+
+            # Kontrola bilanční rovnosti
+            sum_a = st.session_state['draft_rozvaha_a']['Běžné'].sum()
+            sum_p = st.session_state['draft_rozvaha_p']['Běžné'].abs().sum()
+            rozdil = round(sum_a - sum_p, 2)
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Aktiva celkem", f"{sum_a:,.2f} Kč".replace(',', ' '))
+            c2.metric("Pasiva celkem", f"{sum_p:,.2f} Kč".replace(',', ' '))
+            if rozdil == 0:
+                c3.success("⚖️ Vyrovnáno")
+            else:
+                c3.error(f"⚠️ Rozdíl: {rozdil:,.2f} Kč")
 
             if st.button("💾 Archivovat kompletní Rozvahu", type="primary", use_container_width=True):
                 komplet = pd.concat([st.session_state['draft_rozvaha_a'], st.session_state['draft_rozvaha_p']])
@@ -155,12 +164,12 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
 def zobrazit_archiv_vykazu(engine, KLIENT_ID, execute_query):
     st.subheader("📁 Archiv vygenerovaných výkazů")
 
-    # 1. Filtry pro vyhledávání v archivu
+    # Filtry pro vyhledávání
     c1, c2 = st.columns(2)
     search_rok = c1.number_input("Rok", value=datetime.now().year, key="arch_rok_filter")
     search_typ = c2.selectbox("Typ výkazu", ["Vše", "Rozvaha", "Výsledovka", "CF"], key="arch_typ_filter")
 
-    # SQL dotaz pro načtení hlaviček
+    # SQL dotaz načítá i název jednotky uložený v době archivace
     sql_arch = """
         SELECT id, cislo_dokladu, typ_vykazu, rok, kvartal, datum_vytvoreni, nazev_jednotky 
         FROM VykazyArchiv 
@@ -174,93 +183,68 @@ def zobrazit_archiv_vykazu(engine, KLIENT_ID, execute_query):
 
     arch_data = execute_query(sql_arch, tuple(params))
 
-    # --- KONTROLA A PŘEVOD DAT (Řeší chybu pyodbc.Row) ---
     if not arch_data:
-        st.info("V archivu nebyly nalezeny žádné záznamy pro vybrané období.")
+        st.info("V archivu nejsou žádné záznamy pro tohoto klienta.")
         return
 
-    try:
-        # Převod pyodbc.Row na list, aby s tím Pandas mohl pracovat
-        clean_arch_data = [list(row) for row in arch_data]
-        df_arch = pd.DataFrame(
-            clean_arch_data,
-            columns=["ID", "Číslo dokladu", "Typ", "Rok", "Kvartál", "Vytvořeno", "Účetní jednotka"]
-        )
-    except Exception as e:
-        st.error(f"Chyba při zpracování archivu: {e}")
-        return
+    # Převod pyodbc.Row na list pro zpracování v Pandas
+    df_arch = pd.DataFrame(
+        [list(row) for row in arch_data],
+        columns=["ID", "Číslo dokladu", "Typ", "Rok", "Kvartál", "Vytvořeno", "Účetní jednotka"]
+    )
 
-    # Zobrazení přehledové tabulky
+    # Zobrazení tabulky s on_select="rerun" pro interaktivitu
     selected_row = st.dataframe(
         df_arch,
         use_container_width=True,
         hide_index=True,
-        selection_mode="single-row",
-        on_select="rerun"
+        on_select="rerun",
+        selection_mode="single-row"
     )
 
-    # --- DETAIL VYBRANÉHO VÝKAZU ---
-    # Kontrola výběru pomocí .rows
     if selected_row and len(selected_row.selection.rows) > 0:
         idx = selected_row.selection.rows[0]
-
-        # Načtení dat z DataFrame na základě vybraného indexu
         v_id = df_arch.iloc[idx]["ID"]
         v_typ = df_arch.iloc[idx]["Typ"]
         v_cislo = df_arch.iloc[idx]["Číslo dokladu"]
+        # Načtení názvu firmy přímo z řádku archivu
         v_firma = df_arch.iloc[idx]["Účetní jednotka"]
         v_datum = df_arch.iloc[idx]["Vytvořeno"]
 
         st.divider()
-        st.subheader(f"📄 Detail výkazu: {v_cislo}")
+        st.subheader(f"📄 Detail: {v_cislo}")
 
-        # Načtení položek konkrétního výkazu z DB
+        # Načtení položek výkazu
         sql_items = "SELECT kod_polozky, nazev_polozky, zkratka_en, castka_bezne, is_vylouceno FROM VykazyPolozky WHERE vykaz_id = ? ORDER BY id ASC"
         items_raw = execute_query(sql_items, (v_id,))
 
         if items_raw:
-            # Opět převod z pyodbc.Row na list
-            clean_items = [list(r) for r in items_raw]
-            df_items = pd.DataFrame(clean_items, columns=["Kód", "Položka", "Zkratka", "Běžné", "Vyloučit"])
+            df_items = pd.DataFrame([list(r) for r in items_raw],
+                                    columns=["Kód", "Položka", "Zkratka", "Běžné", "Vyloučit"])
+            ed_items = st.data_editor(df_items, num_rows="dynamic", use_container_width=True, key=f"edit_arch_{v_id}")
 
-            # Editor pro úpravu historických dat
-            ed_items = st.data_editor(
-                df_items,
-                num_rows="dynamic",
-                use_container_width=True,
-                key=f"edit_arch_{v_id}",
-                column_config={
-                    "Zkratka": st.column_config.SelectboxColumn(
-                        "Zkratka (EN)",
-                        options=["EBITDA", "EBIT", "EBT", "EAT", "REVENUE", "COGS", "-"]
-                    ),
-                    "Vyloučit": st.column_config.CheckboxColumn("Vyloučit")
-                }
-            )
-
-            # Akční tlačítka pod detailem
             c_save, c_pdf, c_del = st.columns(3)
 
-            if c_save.button("💾 Uložit změny v archivu", use_container_width=True):
+            if c_save.button("💾 Uložit změny", use_container_width=True):
                 for _, row in ed_items.iterrows():
                     execute_query(
                         "UPDATE VykazyPolozky SET nazev_polozky=?, zkratka_en=?, castka_bezne=?, is_vylouceno=? WHERE vykaz_id=? AND kod_polozky=?",
                         (row['Položka'], row['Zkratka'], row['Běžné'], 1 if row['Vyloučit'] else 0, v_id, row['Kód'])
                     )
-                st.success("Změny byly v databázi aktualizovány.")
+                st.success("Změny uloženy.")
 
-            if c_pdf.button("🖨️ Exportovat do PDF", use_container_width=True):
-                # Metadata pro PDF
+            if c_pdf.button("🖨️ Export PDF", use_container_width=True):
+                # ZDE SE DĚJE DYNAMICKÉ NAČTENÍ INFO O KLIENTOVI
+                klient_info = engine.get_klient_info()
+
                 metadata = {
-                    'nazev_jednotky': v_firma,
-                    'ico_jednotky': "IČO",
+                    'nazev_jednotky': v_firma,  # Název z doby uložení
+                    'ico_jednotky': klient_info['ico'],  # Aktuální IČO z tabulky Klienti
                     'sestaveno_k': v_datum.strftime('%d.%m.%Y') if isinstance(v_datum, datetime) else str(v_datum)
                 }
-                # Předpokládám existenci funkce generovat_pdf_vykazu ve vašem projektu
                 pdf_out = generovat_pdf_vykazu(v_typ, v_cislo, metadata, ed_items)
                 st.download_button("📥 STÁHNOUT PDF", pdf_out, f"{v_cislo}.pdf", "application/pdf")
 
-            if c_del.button("🗑️ Smazat z archivu", type="secondary", use_container_width=True):
+            if c_del.button("🗑️ Smazat", type="secondary", use_container_width=True):
                 execute_query("DELETE FROM VykazyArchiv WHERE id = ?", (v_id,))
-                st.warning(f"Výkaz {v_cislo} byl trvale smazán.")
                 st.rerun()
