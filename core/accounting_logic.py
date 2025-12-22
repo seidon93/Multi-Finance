@@ -29,19 +29,48 @@ SABLONA_AKTIVA_FULL = [
 # Mapování pro Pasiva - propojení čísel řádků z obrázků na účetní třídy 3 a 4
 MAPOVANI_PASIVA_FULL = {
     "04": ["411"],       # Základní kapitál
+    "05": ["252"],       # Vlastní podíly (-)
+    "06": ["419"],       # Změny základního kapitálu
     "08": ["412"],       # Ážio
     "10": ["413"],       # Ostatní kapitálové fondy
+    "11": ["414"],       # Oceňovací rozdíly z přecenění majetku a závazků
+    "12": ["418"],       # Oceňovací rozdíly při přeměnách
+    "13": ["417"],       # Rozdíly z přeměn
+    "14": ["416"],       # Rozdíly z ocenění při přeměnách
     "16": ["421"],       # Ostatní rezervní fondy
+    "17": ["423", "427"], # Statutární a ostatní fondy
     "19": ["428", "429"], # Nerozdělený zisk / neuhrazená ztráta minulých let
-    "25": ["451"],       # Rezervy podle zvláštních právních předpisů
+    "22": ["432"],       # Rozhodnuto o zálohové výplatě podílu na zisku (-)
+    "25": ["451"],       # Rezerva na důchody a podobné závazky
     "26": ["453"],       # Rezerva na daň z příjmů
-    "36": ["479"],       # Dlouhodobé závazky z obchodních vztahů
-    "51": ["321"],       # Krátkodobé závazky z obchodních vztahů
+    "27": ["451"],       # Rezervy podle zvláštních právních předpisů
+    "28": ["459"],       # Ostatní rezervy
+    "31": ["473"],       # Vydané dluhopisy (dlouhodobé)
+    "34": ["461"],       # Závazky k úvěrovým institucím (dlouhodobé)
+    "35": ["475"],       # Dlouhodobé přijaté zálohy
+    "37": ["478"],       # Dlouhodobé směnky k úhradě
+    "38": ["471"],       # Závazky - ovládaná nebo ovládající osoba
+    "39": ["472"],       # Závazky - podstatný vliv
+    "40": ["481"],       # Odložený daňový závazek
+    "42": ["361", "364", "365", "366", "367", "368"], # Závazky ke společníkům (dlouhodobé)
+    "43": ["389"],       # Dohadné účty pasivní (dlouhodobé)
+    "44": ["479"],       # Jiné závazky (dlouhodobé)
+    "46": ["241"],       # Vydané dluhopisy (krátkodobé)
+    "49": ["231"],       # Závazky k úvěrovým institucím (krátkodobé)
+    "50": ["324"],       # Krátkodobé přijaté zálohy
+    "51": ["321"],       # Závazky z obchodních vztahů
+    "52": ["322"],       # Krátkodobé směnky k úhradě
+    "53": ["361"],       # Závazky - ovládaná nebo ovládající osoba
+    "54": ["362"],       # Závazky - podstatný vliv
+    "56": ["364", "365"], # Závazky ke společníkům (krátkodobé)
+    "57": ["249"],       # Krátkodobé finanční výpomoci
     "58": ["331"],       # Závazky k zaměstnancům
-    "59": ["336"],       # Závazky ze soc. a zdrav. pojištění
+    "59": ["336"],       # Závazky ze sociálního a zdravotního pojištění
     "60": ["341", "342", "343", "345"], # Stát - daňové závazky a dotace
-    "64": ["383"],       # Výdaje příštích období
-    "65": ["384"],       # Výnosy příštích období
+    "61": ["389"],       # Dohadné účty pasivní (krátkodobé)
+    "62": ["379"],       # Jiné závazky (krátkodobé)
+    "67": ["383"],       # Výdaje příštích období
+    "68": ["384"],       # Výnosy příštích období
 }
 
 # Kompletní skelet Pasiv (výběr hlavních řádků dle image_67194e.png a image_671972.png)
@@ -50,27 +79,60 @@ SABLONA_PASIVA_FULL = [
     {"ozn": "A.", "n": "Vlastní kapitál", "r": "02", "bold": True},
     {"ozn": "A.I.", "n": "Základní kapitál", "r": "03", "bold": True},
     {"ozn": "1.", "n": "Základní kapitál", "r": "04", "bold": False},
+    {"ozn": "2.", "n": "Vlastní podíly (-)", "r": "05", "bold": False},
+    {"ozn": "3.", "n": "Změny základního kapitálu", "r": "06", "bold": False},
     {"ozn": "A.II.", "n": "Ážio a kapitálové fondy", "r": "07", "bold": True},
     {"ozn": "1.", "n": "Ážio", "r": "08", "bold": False},
-    {"ozn": "2.1.", "n": "Ostatní kapitálové fondy", "r": "10", "bold": False},
+    {"ozn": "2.", "n": "Kapitálové fondy", "r": "09", "bold": True},
+    {"ozn": "2.2.", "n": "Oceňovací rozdíly z přecenění majetku a závazků (+/-)", "r": "11", "bold": False},
+    {"ozn": "2.3.", "n": "Oceňovací rozdíly z přecenění při přeměnách (+/-)", "r": "12", "bold": False},
+    {"ozn": "2.4.", "n": "Rozdíly z přeměn obchodních korporací (+/-)", "r": "13", "bold": False},
+    {"ozn": "2.5.", "n": "Rozdíly z ocenění při přeměnách (+/-)", "r": "14", "bold": False},
     {"ozn": "A.III.", "n": "Fondy ze zisku", "r": "15", "bold": True},
+    {"ozn": "1.", "n": "Ostatní rezervní fondy", "r": "16", "bold": False},
+    {"ozn": "2.", "n": "Statutární a ostatní fondy", "r": "17", "bold": False},
     {"ozn": "A.IV.", "n": "Výsledek hospodaření minulých let (+/-)", "r": "18", "bold": True},
-    {"ozn": "1.", "n": "Nerozdělený zisk nebo neuhrazená ztráta minulých let", "r": "19", "bold": False},
+    {"ozn": "1.", "n": "Nerozdělený zisk nebo neuhrazená ztráta minulých let (+/-)", "r": "19", "bold": False},
     {"ozn": "A.V.", "n": "Výsledek hospodaření běžného účetního období (+/-)", "r": "21", "bold": False},
-    {"ozn": "B + C.", "n": "Cizí zdroje", "r": "23", "bold": True},
-    {"ozn": "B.", "n": "Rezervy", "r": "24", "bold": True},
-    {"ozn": "C.", "n": "Závazky", "r": "29", "bold": True},
+    {"ozn": "A.VI.", "n": "Rozhodnuto o zálohové výplatě podílu na zisku (-)", "r": "22", "bold": False},
+    {"ozn": "B + C.", "n": "Cizí zdroje (součet B. + C.)", "r": "23", "bold": True},
+    {"ozn": "B.", "n": "Rezervy (součet B.1. až B.4.)", "r": "24", "bold": True},
+    {"ozn": "1.", "n": "Rezerva na důchody a podobné závazky", "r": "25", "bold": False},
+    {"ozn": "2.", "n": "Rezerva na daň z příjmů", "r": "26", "bold": False},
+    {"ozn": "3.", "n": "Rezervy podle zvláštních právních předpisů", "r": "27", "bold": False},
+    {"ozn": "4.", "n": "Ostatní rezervy", "r": "28", "bold": False},
+    {"ozn": "C.", "n": "Závazky (součet C.I. + C.II. + C.III.)", "r": "29", "bold": True},
     {"ozn": "C.I.", "n": "Dlouhodobé závazky", "r": "30", "bold": True},
-    {"ozn": "4.", "n": "Závazky z obchodních vztahů", "r": "36", "bold": False},
+    {"ozn": "1.", "n": "Vydané dluhopisy", "r": "31", "bold": True},
+    {"ozn": "1.1.", "n": "Vyměnitelné dluhopisy", "r": "32", "bold": False},
+    {"ozn": "1.2.", "n": "Ostatní dluhopisy", "r": "33", "bold": False},
+    {"ozn": "2.", "n": "Závazky k úvěrovým institucím", "r": "34", "bold": False},
+    {"ozn": "3.", "n": "Dlouhodobé přijaté zálohy", "r": "35", "bold": False},
+    {"ozn": "5.", "n": "Dlouhodobé směnky k úhradě", "r": "37", "bold": False},
+    {"ozn": "6.", "n": "Závazky - ovládaná nebo ovládající osoba", "r": "38", "bold": False},
+    {"ozn": "7.", "n": "Závazky - podstatný vliv", "r": "39", "bold": False},
+    {"ozn": "8.", "n": "Odložený daňový závazek", "r": "40", "bold": False},
+    {"ozn": "9.", "n": "Závazky - ostatní", "r": "41", "bold": True},
+    {"ozn": "9.1.", "n": "Závazky ke společníkům", "r": "42", "bold": False},
+    {"ozn": "9.2.", "n": "Dohadné účty pasivní", "r": "43", "bold": False},
+    {"ozn": "9.3.", "n": "Jiné závazky", "r": "44", "bold": False},
     {"ozn": "C.II.", "n": "Krátkodobé závazky", "r": "45", "bold": True},
-    {"ozn": "4.", "n": "Závazky z obchodních vztahů", "r": "51", "bold": False},
-    {"ozn": "8.3.", "n": "Závazky k zaměstnancům", "r": "58", "bold": False},
-    {"ozn": "8.4.", "n": "Závazky ze sociálního a zdravotního pojištění", "r": "59", "bold": False},
-    {"ozn": "8.5.", "n": "Stát - daňové závazky a dotace", "r": "60", "bold": False},
-    {"ozn": "C.III.", "n": "Časové rozlišení pasiv", "r": "63", "bold": True},
-    {"ozn": "1.", "n": "Výdaje příštích období", "r": "64", "bold": False},
-    {"ozn": "2.", "n": "Výnosy příštích období", "r": "65", "bold": False},
+    {"ozn": "1.", "n": "Vydané dluhopisy", "r": "46", "bold": True},
+    {"ozn": "1.1.", "n": "Vyměnitelné dluhopisy", "r": "47", "bold": False},
+    {"ozn": "1.2.", "n": "Ostatní dluhopisy", "r": "48", "bold": False},
+    {"ozn": "2.", "n": "Závazky k úvěrovým institucím", "r": "49", "bold": False},
+    {"ozn": "3.", "n": "Krátkodobé přijaté zálohy", "r": "50", "bold": False},
+    {"ozn": "5.", "n": "Krátkodobé směnky k úhradě", "r": "52", "bold": False},
+    {"ozn": "6.", "n": "Závazky - ovládaná nebo ovládající osoba", "r": "53", "bold": False},
+    {"ozn": "7.", "n": "Závazky - podstatný vliv", "r": "54", "bold": False},
+    {"ozn": "8.", "n": "Závazky ostatní", "r": "55", "bold": True},
+    {"ozn": "8.1.", "n": "Závazky ke společníkům", "r": "56", "bold": False},
+    {"ozn": "8.2.", "n": "Krátkodobé finanční výpomoci", "r": "57", "bold": False},
+    {"ozn": "8.6.", "n": "Dohadné účty pasivní", "r": "61", "bold": False},
+    {"ozn": "8.7.", "n": "Jiné závazky", "r": "62", "bold": False},
     {"ozn": "D.", "n": "Časové rozlišení pasiv", "r": "66", "bold": True},
+    {"ozn": "1.", "n": "Výdaje příštích období", "r": "67", "bold": False},
+    {"ozn": "2.", "n": "Výnosy příštích období", "r": "68", "bold": False},
 ]
 
 
