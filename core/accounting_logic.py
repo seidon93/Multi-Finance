@@ -6,27 +6,42 @@ import pandas as pd
 import os
 import streamlit as st
 
+# --- MAPOVÁNÍ ÚČTŮ (SYNTETIKY) ---
 MAPOVANI_AKTIV_FULL = {
     "02": ["353"], "05": ["011"], "07": ["013"], "16": ["031"], "17": ["021"],
     "39": ["112", "111"], "48": ["311"], "64": ["343"], "76": ["211"], "77": ["221"]
 }
 
-# Kompletní struktura Aktiv se 7 sloupci podle úředního vzoru
+MAPOVANI_PASIVA_FULL = {
+    "03": ["411"],       # Základní kapitál
+    "06": ["413", "414"], # Kapitálové fondy
+    "56": ["321", "325"], # Závazky z obch. vztahů
+    "66": ["331", "336"], # Závazky k zaměstnancům a institucím
+    "73": ["342", "343", "345"] # Daňové závazky
+}
+
+# --- ŠABLONY TISKOPISŮ ---
 SABLONA_AKTIVA_FULL = [
     {"ozn": "", "n": "AKTIVA CELKEM (A+B+C+D)", "r": "01", "bold": True},
     {"ozn": "A.", "n": "Pohledávky za upsaný základní kapitál", "r": "02", "bold": True},
     {"ozn": "B.", "n": "Stálá aktiva", "r": "03", "bold": True},
-    {"ozn": "B.I.", "n": "Dlouhodobý nehmotný majetek", "r": "04", "bold": True},
     {"ozn": "1.", "n": "Nehmotné výsledky vývoje", "r": "05", "bold": False},
-    {"ozn": "B.II.", "n": "Dlouhodobý hmotný majetek", "r": "14", "bold": True},
-    {"ozn": "1.1.", "n": "Pozemky", "r": "16", "bold": False},
     {"ozn": "1.2.", "n": "Stavby", "r": "17", "bold": False},
     {"ozn": "C.", "n": "Oběžná aktiva", "r": "37", "bold": True},
-    {"ozn": "C.I.", "n": "Zásoby", "r": "38", "bold": True},
     {"ozn": "1.", "n": "Materiál", "r": "39", "bold": False},
     {"ozn": "C.IV.", "n": "Peněžní prostředky", "r": "75", "bold": True},
     {"ozn": "1.", "n": "Peněžní prostředky v pokladně", "r": "76", "bold": False},
     {"ozn": "2.", "n": "Peněžní prostředky na účtech", "r": "77", "bold": False},
+]
+
+SABLONA_PASIVA_FULL = [
+    {"ozn": "", "n": "PASIVA CELKEM (A+B+C)", "r": "01", "bold": True},
+    {"ozn": "A.", "n": "Vlastní kapitál", "r": "02", "bold": True},
+    {"ozn": "A.I.", "n": "Základní kapitál", "r": "03", "bold": False},
+    {"ozn": "B.", "n": "Cizí zdroje", "r": "41", "bold": True},
+    {"ozn": "B.II.", "n": "Krátkodobé závazky", "r": "55", "bold": True},
+    {"ozn": "1.", "n": "Závazky z obchodních vztahů", "r": "56", "bold": False},
+    {"ozn": "C.", "n": "Časové rozlišení pasiv", "r": "82", "bold": True},
 ]
 
 
@@ -1379,32 +1394,47 @@ class AccountingEngine:
             return []
 
     def get_vykaz_podklady(self, klient_id, datum_k, typ_vykazu):
-        """Sestaví dynamická data výkazu pro konkrétního klienta se 7 sloupci."""
-        # Filtrujeme zůstatky POUZE pro aktuálně přihlášeného klienta
         self.klient_id = klient_id
         zustatky = self.spocti_zustatky(datum_do=datum_k)
         report_data = []
 
-        for radek in SABLONA_AKTIVA_FULL:
-            masky = MAPOVANI_AKTIV_FULL.get(radek["r"], [])
+        # --- OPRAVA: Výběr správné šablony podle typu ---
+        if "Aktiva" in typ_vykazu:
+            sablona, mapovani = SABLONA_AKTIVA_FULL, MAPOVANI_AKTIV_FULL
+        elif "Pasiva" in typ_vykazu:
+            sablona, mapovani = SABLONA_PASIVA_FULL, MAPOVANI_PASIVA_FULL
+        else:
+            return []
 
-            # Agregace analytiky: sčítáme vše, co začíná danou syntetikou
-            brutto = sum(float(val) for u, val in zustatky.items() if any(str(u).startswith(m) for m in masky))
+        for radek in sablona:
+            masky = mapovani.get(radek["r"], [])
+            # Agregace analytiky
+            brutto_calc = sum(float(val) for u, val in zustatky.items() if any(str(u).startswith(m) for m in masky))
 
-            # Výpočet Netto a načtení historie pro sloupec 4
-            korekce = 0.0  # Zde lze doplnit výpočet oprávek (třída 07, 08)
-            netto = brutto - korekce
-            minule_netto = self.get_minule_obdobi_netto("Rozvaha", datum_k.year, radek["r"])
+            # Pasiva a Výnosy otáčíme na kladná čísla pro výkaz
+            if "Pasiva" in typ_vykazu:
+                brutto_calc = abs(brutto_calc)
 
-            # KLÍČOVÁ OPRAVA: Názvy klíčů musí odpovídat hlavičkám v UI
+            korekce_calc = 0.0
+            netto_calc = brutto_calc - korekce_calc
+            minule_netto_calc = self.get_minule_obdobi_netto(typ_vykazu, datum_k.year, radek["r"])
+
+            # --- VIZUÁLNÍ TRIK: Pro nadpisy (bold) nastavíme None, aby v UI nebyla čísla ---
+            if radek["bold"]:
+                val_b, val_k, val_n, val_m, val_z = None, None, None, None, ""
+            else:
+                val_b, val_k, val_n, val_m, val_z = brutto_calc, korekce_calc, netto_calc, minule_netto_calc, ", ".join(
+                    masky)
+
             report_data.append({
                 "Označení": radek["ozn"],
-                "AKTIVA": radek["n"],
+                "POLOŽKA": radek["n"],  # Sjednocený název pro obě strany
                 "Číslo řádku": radek["r"],
-                "Brutto": brutto,
-                "Korekce": korekce,
-                "Netto": netto,
-                "Minulé období": minule_netto,
+                "Brutto": val_b,
+                "Korekce": val_k,
+                "Netto": val_n,
+                "Minulé období": val_m,
+                "Zdroj": val_z,
                 "is_bold": radek["bold"]
             })
         return report_data
