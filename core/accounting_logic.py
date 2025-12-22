@@ -6,6 +6,43 @@ import pandas as pd
 import os
 import streamlit as st
 
+# Mapování řádků Aktiv na syntetické účty (automaticky zahrne veškerou analytiku)
+MAPOVANI_AKTIV_FULL = {
+    "02": ["353"],  # Pohledávky za upsaný ZK
+    "05": ["011"],  # Nehmotné výsledky vývoje
+    "07": ["013"],  # Software
+    "16": ["031"],  # Pozemky
+    "17": ["021"],  # Stavby
+    "39": ["112", "111"],  # Zásoby - materiál
+    "48": ["311"],  # Pohledávky z obch. vztahů
+    "64": ["343"],  # Daňové pohledávky (DPH)
+    "76": ["211"],  # Peněžní prostředky v pokladně
+    "77": ["221"],  # Peněžní prostředky na účtech
+}
+
+# Kompletní struktura řádků Aktiv podle oficiálního vzoru
+SABLONA_AKTIVA_FULL = [
+    {"ozn": "", "n": "AKTIVA CELKEM (A+B+C+D)", "r": "01", "bold": True},
+    {"ozn": "A.", "n": "Pohledávky za upsaný základní kapitál", "r": "02", "bold": True},
+    {"ozn": "B.", "n": "Stálá aktiva (B.I. + B.II. + B.III.)", "r": "03", "bold": True},
+    {"ozn": "B.I.", "n": "Dlouhodobý nehmotný majetek", "r": "04", "bold": True},
+    {"ozn": "1.", "n": "Nehmotné výsledky vývoje", "r": "05", "bold": False},
+    {"ozn": "2.1.", "n": "Software", "r": "07", "bold": False},
+    {"ozn": "B.II.", "n": "Dlouhodobý hmotný majetek", "r": "14", "bold": True},
+    {"ozn": "1.", "n": "Pozemky a stavby", "r": "15", "bold": True},
+    {"ozn": "1.1.", "n": "Pozemky", "r": "16", "bold": False},
+    {"ozn": "1.2.", "n": "Stavby", "r": "17", "bold": False},
+    {"ozn": "C.", "n": "Oběžná aktiva (C.I. + C.II. + C.III. + C.IV.)", "r": "37", "bold": True},
+    {"ozn": "C.I.", "n": "Zásoby", "r": "38", "bold": True},
+    {"ozn": "1.", "n": "Materiál", "r": "39", "bold": False},
+    {"ozn": "C.II.", "n": "Pohledávky", "r": "46", "bold": True},
+    {"ozn": "1.1.", "n": "Pohledávky z obchodních vztahů", "r": "48", "bold": False},
+    {"ozn": "4.3.", "n": "Stát - daňové pohledávky", "r": "64", "bold": False},
+    {"ozn": "C.IV.", "n": "Peněžní prostředky", "r": "75", "bold": True},
+    {"ozn": "1.", "n": "Peněžní prostředky v pokladně", "r": "76", "bold": False},
+    {"ozn": "2.", "n": "Peněžní prostředky na účtech", "r": "77", "bold": False},
+]
+
 
 class AccountingEngine:
     """Třída pro výpočet účetních dat a reportů."""
@@ -1356,32 +1393,125 @@ class AccountingEngine:
             return []
 
     def get_vykaz_podklady(self, klient_id, datum_k, typ_vykazu):
-        try:
-            # Převedení datumu na stringy
-            datum_k_str = datum_k.strftime('%Y-%m-%d')
-            # Výpočet začátku roku (pro správné rozmezí v SQL proceduře)
-            datum_od_str = f"{datum_k.year}-01-01"
+        """Sestaví dynamická data výkazu se 7 sloupci a agregací analytiky."""
+        # Vždy pracujeme s aktuálně uctovaným klientem
+        self.klient_id = klient_id
+        zustatky = self.spocti_zustatky(datum_do=datum_k)
+        report_data = []
+        sablona = SABLONA_AKTIVA_FULL if "Aktiva" in typ_vykazu else []
+        mapovani = MAPOVANI_AKTIV_FULL if "Aktiva" in typ_vykazu else {}
 
-            if typ_vykazu == "Rozvaha_Aktiva":
-                # Voláme proceduru se 4 parametry: ID, OD, DO, SEKCE
-                sql = "{CALL sp_Vykaz_Rozvaha (?, ?, ?, ?)}"
-                params = (klient_id, datum_od_str, datum_k_str, 'Aktiva')
-            elif typ_vykazu == "Rozvaha_Pasiva":
-                sql = "{CALL sp_Vykaz_Rozvaha (?, ?, ?, ?)}"
-                params = (klient_id, datum_od_str, datum_k_str, 'Pasiva')
-            else:
-                return []
+        for radek in sablona:
+            masky = mapovani.get(radek["r"], [])
 
-            res = self.execute_query(sql, params)
+            # Agregace analytiky: sečteme vše, co začíná syntetickou maskou (např. 221.100 pod 221)
+            brutto = sum(float(val) for u, val in zustatky.items() if any(str(u).startswith(m) for m in masky))
 
-            # LOGOVÁNÍ PRO DEBUG (uvidíte v terminálu/konzoli)
-            print(f"DEBUG SQL CALL: {typ_vykazu} pro KlientID {klient_id}, od {datum_od_str} do {datum_k_str}")
-            print(f"DEBUG RESULT: Vráceno {len(res) if res else 0} řádků")
+            # Korekce: oprávky třídy 07, 08, 09 (např. 071 pro nehmotný majetek 011)
+            korekce = 0.0
+            if radek["r"] in ["05", "07", "17"]:
+                korekce_masky = [f"07{m[1:]}" for m in masky if m.startswith('01')]
+                korekce_masky += [f"08{m[1:]}" for m in masky if m.startswith('02')]
+                korekce = abs(sum(
+                    float(val) for u, val in zustatky.items() if any(str(u).startswith(km) for km in korekce_masky)))
 
-            return [list(row) for row in res] if res else []
-        except Exception as e:
-            print(f"❌ CHYBA ENGINE: {e}")
-            return []
+            netto = brutto - korekce
+
+            # Dynamické načtení minulého období z databáze
+            minule_netto = self.get_minule_obdobi_netto("Rozvaha", datum_k.year, radek["r"])
+
+            report_data.append({
+                "Označení (a)": radek["ozn"],
+                "AKTIVA (b)": radek["n"],
+                "Číslo řádku (c)": radek["r"],
+                "Brutto (1)": brutto,
+                "Korekce (2)": korekce,
+                "Netto (3)": netto,
+                "Minulé úč. období (4)": minule_netto,
+                "Zdroj (Účty)": ", ".join(masky),  # Trasovatelnost pro uživatele
+                "is_bold": radek["bold"]
+            })
+        return report_data
+
+    def get_minule_obdobi_netto(self, typ_vykazu, rok, radek_kod):
+        """Vyhledá v archivu konkrétního klienta hodnotu z minulého roku."""
+        sql = """
+            SELECT castka_bezne FROM VykazyPolozky P
+            JOIN VykazyArchiv A ON P.vykaz_id = A.id
+            WHERE A.klient_id = ? AND A.typ_vykazu = ? AND A.rok = ? AND P.kod_polozky = ?
+        """
+        res = self.execute_query(sql, (self.klient_id, typ_vykazu, rok - 1, radek_kod))
+        return float(res[0][0]) if res else 0.0
+
+    def render_professional_assets_table(engine, datum_k):
+        st.markdown("### ⚖️ Rozvaha: AKTIVA (Plný rozsah)")
+
+        # Načtení dat přes novou agregační logiku
+        rows = engine.get_rozvaha_assets_full(datum_k)
+        df = pd.DataFrame(rows)
+
+        # Definice sloupců přesně podle úředního tiskopisu
+        cols_rename = {
+            "ozn": "Označení (a)",
+            "polozka": "AKTIVA (b)",
+            "radek": "Číslo řádku (c)",
+            "brutto": "Brutto (1)",
+            "korekce": "Korekce (2)",
+            "netto": "Netto (3)",
+            "minule": "Minulé úč. období (4)",
+            "zdroj": "Zdroj (Analytika)"
+        }
+
+        df_display = df.rename(columns=cols_rename)
+
+        # Funkce pro zvýraznění sekcí (Bold + Dark Background)
+        def style_rows(row):
+            is_bold = df.iloc[row.name]["is_bold"]
+            if is_bold:
+                return ['font-weight: bold; background-color: #1a1c23; color: #ffffff' for _ in row]
+            return ['' for _ in row]
+
+        st.data_editor(
+            df_display.style.apply(style_rows, axis=1),
+            column_config={
+                "is_bold": None,  # Skrytí pomocného sloupce
+                "Brutto (1)": st.column_config.NumberColumn(format="%.2f"),
+                "Korekce (2)": st.column_config.NumberColumn(format="%.2f"),
+                "Netto (3)": st.column_config.NumberColumn(format="%.2f"),
+                "Zdroj (Analytika)": st.column_config.TextColumn(help="Syntetické účty tvořící tento řádek")
+            },
+            disabled=["Označení (a)", "Číslo řádku (c)"],  # Předepsané hodnoty nelze měnit
+            hide_index=True,
+            use_container_width=True,
+            key="full_assets_editor_pro"
+        )
+
+    def zobrazit_profesionalni_rozvahu_ui(engine, datum_k):
+        st.subheader("⚖️ Rozvaha: AKTIVA (Plný rozsah)")
+
+        # Načtení dat pro aktuálního klienta
+        data = engine.get_vykaz_podklady(engine.klient_id, datum_k, "Rozvaha_Aktiva")
+        df = pd.DataFrame(data)
+
+        # Styl: Bold pro hlavní sekce (např. AKTIVA CELKEM)
+        def style_vykaz(row):
+            return ['font-weight: bold; background-color: #1a1c23' if row['is_bold'] else '' for _ in row]
+
+        st.data_editor(
+            df.style.apply(style_vykaz, axis=1),
+            column_config={
+                "is_bold": None,  # Skrytý sloupec
+                "Brutto (1)": st.column_config.NumberColumn(format="%.2f"),
+                "Korekce (2)": st.column_config.NumberColumn(format="%.2f"),
+                "Netto (3)": st.column_config.NumberColumn(format="%.2f"),
+                "Minulé úč. období (4)": st.column_config.NumberColumn(format="%.2f"),
+                "Zdroj (Účty)": st.column_config.TextColumn("Zdroj", help="Syntetické účty tvořící sumu")
+            },
+            disabled=["Označení (a)", "Číslo řádku (c)", "AKTIVA (b)"],  # Předepsaná pole jsou zamčená
+            hide_index=True,
+            use_container_width=True,
+            key="full_balance_editor"
+        )
 
     def ulozit_vykaz_do_archivu(self, typ_vykazu, rok, kvartal, df_polozky, metadata):
         """Uloží vygenerovaný výkaz do archivu (hlavička + položky)."""
