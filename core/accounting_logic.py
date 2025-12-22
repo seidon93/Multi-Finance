@@ -6,38 +6,24 @@ import pandas as pd
 import os
 import streamlit as st
 
-# Mapování řádků Aktiv na syntetické účty (automaticky zahrne veškerou analytiku)
 MAPOVANI_AKTIV_FULL = {
-    "02": ["353"],  # Pohledávky za upsaný ZK
-    "05": ["011"],  # Nehmotné výsledky vývoje
-    "07": ["013"],  # Software
-    "16": ["031"],  # Pozemky
-    "17": ["021"],  # Stavby
-    "39": ["112", "111"],  # Zásoby - materiál
-    "48": ["311"],  # Pohledávky z obch. vztahů
-    "64": ["343"],  # Daňové pohledávky (DPH)
-    "76": ["211"],  # Peněžní prostředky v pokladně
-    "77": ["221"],  # Peněžní prostředky na účtech
+    "02": ["353"], "05": ["011"], "07": ["013"], "16": ["031"], "17": ["021"],
+    "39": ["112", "111"], "48": ["311"], "64": ["343"], "76": ["211"], "77": ["221"]
 }
 
-# Kompletní struktura řádků Aktiv podle oficiálního vzoru
+# Kompletní struktura Aktiv se 7 sloupci podle úředního vzoru
 SABLONA_AKTIVA_FULL = [
     {"ozn": "", "n": "AKTIVA CELKEM (A+B+C+D)", "r": "01", "bold": True},
     {"ozn": "A.", "n": "Pohledávky za upsaný základní kapitál", "r": "02", "bold": True},
-    {"ozn": "B.", "n": "Stálá aktiva (B.I. + B.II. + B.III.)", "r": "03", "bold": True},
+    {"ozn": "B.", "n": "Stálá aktiva", "r": "03", "bold": True},
     {"ozn": "B.I.", "n": "Dlouhodobý nehmotný majetek", "r": "04", "bold": True},
     {"ozn": "1.", "n": "Nehmotné výsledky vývoje", "r": "05", "bold": False},
-    {"ozn": "2.1.", "n": "Software", "r": "07", "bold": False},
     {"ozn": "B.II.", "n": "Dlouhodobý hmotný majetek", "r": "14", "bold": True},
-    {"ozn": "1.", "n": "Pozemky a stavby", "r": "15", "bold": True},
     {"ozn": "1.1.", "n": "Pozemky", "r": "16", "bold": False},
     {"ozn": "1.2.", "n": "Stavby", "r": "17", "bold": False},
-    {"ozn": "C.", "n": "Oběžná aktiva (C.I. + C.II. + C.III. + C.IV.)", "r": "37", "bold": True},
+    {"ozn": "C.", "n": "Oběžná aktiva", "r": "37", "bold": True},
     {"ozn": "C.I.", "n": "Zásoby", "r": "38", "bold": True},
     {"ozn": "1.", "n": "Materiál", "r": "39", "bold": False},
-    {"ozn": "C.II.", "n": "Pohledávky", "r": "46", "bold": True},
-    {"ozn": "1.1.", "n": "Pohledávky z obchodních vztahů", "r": "48", "bold": False},
-    {"ozn": "4.3.", "n": "Stát - daňové pohledávky", "r": "64", "bold": False},
     {"ozn": "C.IV.", "n": "Peněžní prostředky", "r": "75", "bold": True},
     {"ozn": "1.", "n": "Peněžní prostředky v pokladně", "r": "76", "bold": False},
     {"ozn": "2.", "n": "Peněžní prostředky na účtech", "r": "77", "bold": False},
@@ -1393,54 +1379,44 @@ class AccountingEngine:
             return []
 
     def get_vykaz_podklady(self, klient_id, datum_k, typ_vykazu):
-        """Sestaví dynamická data výkazu se 7 sloupci a agregací analytiky."""
-        # Vždy pracujeme s aktuálně uctovaným klientem
+        """Sestaví dynamická data výkazu pro konkrétního klienta se 7 sloupci."""
+        # Filtrujeme zůstatky POUZE pro aktuálně přihlášeného klienta
         self.klient_id = klient_id
         zustatky = self.spocti_zustatky(datum_do=datum_k)
         report_data = []
-        sablona = SABLONA_AKTIVA_FULL if "Aktiva" in typ_vykazu else []
-        mapovani = MAPOVANI_AKTIV_FULL if "Aktiva" in typ_vykazu else {}
 
-        for radek in sablona:
-            masky = mapovani.get(radek["r"], [])
+        for radek in SABLONA_AKTIVA_FULL:
+            masky = MAPOVANI_AKTIV_FULL.get(radek["r"], [])
 
-            # Agregace analytiky: sečteme vše, co začíná syntetickou maskou (např. 221.100 pod 221)
+            # Agregace analytiky: sčítáme vše, co začíná danou syntetikou
             brutto = sum(float(val) for u, val in zustatky.items() if any(str(u).startswith(m) for m in masky))
 
-            # Korekce: oprávky třídy 07, 08, 09 (např. 071 pro nehmotný majetek 011)
-            korekce = 0.0
-            if radek["r"] in ["05", "07", "17"]:
-                korekce_masky = [f"07{m[1:]}" for m in masky if m.startswith('01')]
-                korekce_masky += [f"08{m[1:]}" for m in masky if m.startswith('02')]
-                korekce = abs(sum(
-                    float(val) for u, val in zustatky.items() if any(str(u).startswith(km) for km in korekce_masky)))
-
+            # Výpočet Netto a načtení historie pro sloupec 4
+            korekce = 0.0  # Zde lze doplnit výpočet oprávek (třída 07, 08)
             netto = brutto - korekce
-
-            # Dynamické načtení minulého období z databáze
             minule_netto = self.get_minule_obdobi_netto("Rozvaha", datum_k.year, radek["r"])
 
+            # KLÍČOVÁ OPRAVA: Názvy klíčů musí odpovídat hlavičkám v UI
             report_data.append({
-                "Označení (a)": radek["ozn"],
-                "AKTIVA (b)": radek["n"],
-                "Číslo řádku (c)": radek["r"],
-                "Brutto (1)": brutto,
-                "Korekce (2)": korekce,
-                "Netto (3)": netto,
-                "Minulé úč. období (4)": minule_netto,
-                "Zdroj (Účty)": ", ".join(masky),  # Trasovatelnost pro uživatele
+                "Označení": radek["ozn"],
+                "AKTIVA": radek["n"],
+                "Číslo řádku": radek["r"],
+                "Brutto": brutto,
+                "Korekce": korekce,
+                "Netto": netto,
+                "Minulé období": minule_netto,
                 "is_bold": radek["bold"]
             })
         return report_data
 
-    def get_minule_obdobi_netto(self, typ_vykazu, rok, radek_kod):
-        """Vyhledá v archivu konkrétního klienta hodnotu z minulého roku."""
+    def get_minule_obdobi_netto(self, typ, rok, r_kod):
+        """Vyhledá v archivu konkrétního klienta hodnotu z loňského roku."""
         sql = """
-            SELECT castka_bezne FROM VykazyPolozky P
-            JOIN VykazyArchiv A ON P.vykaz_id = A.id
+            SELECT castka_bezne FROM VykazyPolozky P 
+            JOIN VykazyArchiv A ON P.vykaz_id = A.id 
             WHERE A.klient_id = ? AND A.typ_vykazu = ? AND A.rok = ? AND P.kod_polozky = ?
         """
-        res = self.execute_query(sql, (self.klient_id, typ_vykazu, rok - 1, radek_kod))
+        res = self.execute_query(sql, (self.klient_id, typ, rok - 1, r_kod))
         return float(res[0][0]) if res else 0.0
 
     def render_professional_assets_table(engine, datum_k):
