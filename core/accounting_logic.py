@@ -12,14 +12,6 @@ MAPOVANI_AKTIV_FULL = {
     "39": ["112", "111"], "48": ["311"], "64": ["343"], "76": ["211"], "77": ["221"]
 }
 
-MAPOVANI_PASIVA_FULL = {
-    "03": ["411"],       # Základní kapitál
-    "06": ["413", "414"], # Kapitálové fondy
-    "56": ["321", "325"], # Závazky z obch. vztahů
-    "66": ["331", "336"], # Závazky k zaměstnancům a institucím
-    "73": ["342", "343", "345"] # Daňové závazky
-}
-
 # --- ŠABLONY TISKOPISŮ ---
 SABLONA_AKTIVA_FULL = [
     {"ozn": "", "n": "AKTIVA CELKEM (A+B+C+D)", "r": "01", "bold": True},
@@ -34,14 +26,51 @@ SABLONA_AKTIVA_FULL = [
     {"ozn": "2.", "n": "Peněžní prostředky na účtech", "r": "77", "bold": False},
 ]
 
+# Mapování pro Pasiva - propojení čísel řádků z obrázků na účetní třídy 3 a 4
+MAPOVANI_PASIVA_FULL = {
+    "04": ["411"],       # Základní kapitál
+    "08": ["412"],       # Ážio
+    "10": ["413"],       # Ostatní kapitálové fondy
+    "16": ["421"],       # Ostatní rezervní fondy
+    "19": ["428", "429"], # Nerozdělený zisk / neuhrazená ztráta minulých let
+    "25": ["451"],       # Rezervy podle zvláštních právních předpisů
+    "26": ["453"],       # Rezerva na daň z příjmů
+    "36": ["479"],       # Dlouhodobé závazky z obchodních vztahů
+    "51": ["321"],       # Krátkodobé závazky z obchodních vztahů
+    "58": ["331"],       # Závazky k zaměstnancům
+    "59": ["336"],       # Závazky ze soc. a zdrav. pojištění
+    "60": ["341", "342", "343", "345"], # Stát - daňové závazky a dotace
+    "64": ["383"],       # Výdaje příštích období
+    "65": ["384"],       # Výnosy příštích období
+}
+
+# Kompletní skelet Pasiv (výběr hlavních řádků dle image_67194e.png a image_671972.png)
 SABLONA_PASIVA_FULL = [
-    {"ozn": "", "n": "PASIVA CELKEM (A+B+C)", "r": "01", "bold": True},
+    {"ozn": "", "n": "PASIVA CELKEM (A. + B. + C. + D.)", "r": "01", "bold": True},
     {"ozn": "A.", "n": "Vlastní kapitál", "r": "02", "bold": True},
-    {"ozn": "A.I.", "n": "Základní kapitál", "r": "03", "bold": False},
-    {"ozn": "B.", "n": "Cizí zdroje", "r": "41", "bold": True},
-    {"ozn": "B.II.", "n": "Krátkodobé závazky", "r": "55", "bold": True},
-    {"ozn": "1.", "n": "Závazky z obchodních vztahů", "r": "56", "bold": False},
-    {"ozn": "C.", "n": "Časové rozlišení pasiv", "r": "82", "bold": True},
+    {"ozn": "A.I.", "n": "Základní kapitál", "r": "03", "bold": True},
+    {"ozn": "1.", "n": "Základní kapitál", "r": "04", "bold": False},
+    {"ozn": "A.II.", "n": "Ážio a kapitálové fondy", "r": "07", "bold": True},
+    {"ozn": "1.", "n": "Ážio", "r": "08", "bold": False},
+    {"ozn": "2.1.", "n": "Ostatní kapitálové fondy", "r": "10", "bold": False},
+    {"ozn": "A.III.", "n": "Fondy ze zisku", "r": "15", "bold": True},
+    {"ozn": "A.IV.", "n": "Výsledek hospodaření minulých let (+/-)", "r": "18", "bold": True},
+    {"ozn": "1.", "n": "Nerozdělený zisk nebo neuhrazená ztráta minulých let", "r": "19", "bold": False},
+    {"ozn": "A.V.", "n": "Výsledek hospodaření běžného účetního období (+/-)", "r": "21", "bold": False},
+    {"ozn": "B + C.", "n": "Cizí zdroje", "r": "23", "bold": True},
+    {"ozn": "B.", "n": "Rezervy", "r": "24", "bold": True},
+    {"ozn": "C.", "n": "Závazky", "r": "29", "bold": True},
+    {"ozn": "C.I.", "n": "Dlouhodobé závazky", "r": "30", "bold": True},
+    {"ozn": "4.", "n": "Závazky z obchodních vztahů", "r": "36", "bold": False},
+    {"ozn": "C.II.", "n": "Krátkodobé závazky", "r": "45", "bold": True},
+    {"ozn": "4.", "n": "Závazky z obchodních vztahů", "r": "51", "bold": False},
+    {"ozn": "8.3.", "n": "Závazky k zaměstnancům", "r": "58", "bold": False},
+    {"ozn": "8.4.", "n": "Závazky ze sociálního a zdravotního pojištění", "r": "59", "bold": False},
+    {"ozn": "8.5.", "n": "Stát - daňové závazky a dotace", "r": "60", "bold": False},
+    {"ozn": "C.III.", "n": "Časové rozlišení pasiv", "r": "63", "bold": True},
+    {"ozn": "1.", "n": "Výdaje příštích období", "r": "64", "bold": False},
+    {"ozn": "2.", "n": "Výnosy příštích období", "r": "65", "bold": False},
+    {"ozn": "D.", "n": "Časové rozlišení pasiv", "r": "66", "bold": True},
 ]
 
 
@@ -1398,37 +1427,38 @@ class AccountingEngine:
         zustatky = self.spocti_zustatky(datum_do=datum_k)
         report_data = []
 
-        # --- OPRAVA: Výběr správné šablony podle typu ---
         if "Aktiva" in typ_vykazu:
             sablona, mapovani = SABLONA_AKTIVA_FULL, MAPOVANI_AKTIV_FULL
-        elif "Pasiva" in typ_vykazu:
-            sablona, mapovani = SABLONA_PASIVA_FULL, MAPOVANI_PASIVA_FULL
         else:
-            return []
+            sablona, mapovani = SABLONA_PASIVA_FULL, MAPOVANI_PASIVA_FULL
+
+        # Předvýpočet HV pro řádek 21 Pasiv
+        rep_hv = self.get_report_data(datum_do=datum_k)
+        hv_aktualni = rep_hv['hospodarsky_vysledek'] if rep_hv else 0.0
 
         for radek in sablona:
             masky = mapovani.get(radek["r"], [])
+
             # Agregace analytiky
-            brutto_calc = sum(float(val) for u, val in zustatky.items() if any(str(u).startswith(m) for m in masky))
+            if "Pasiva" in typ_vykazu and radek["r"] == "21":
+                # Speciální logika pro HV běžného období
+                brutto_calc = hv_aktualni
+            else:
+                brutto_calc = sum(float(val) for u, val in zustatky.items() if any(str(u).startswith(m) for m in masky))
+                # Pasiva otáčíme na kladná čísla (v DB jsou na straně D jako záporná)
+                if "Pasiva" in typ_vykazu: brutto_calc = abs(brutto_calc)
 
-            # Pasiva a Výnosy otáčíme na kladná čísla pro výkaz
-            if "Pasiva" in typ_vykazu:
-                brutto_calc = abs(brutto_calc)
-
-            korekce_calc = 0.0
-            netto_calc = brutto_calc - korekce_calc
             minule_netto_calc = self.get_minule_obdobi_netto(typ_vykazu, datum_k.year, radek["r"])
 
-            # --- VIZUÁLNÍ TRIK: Pro nadpisy (bold) nastavíme None, aby v UI nebyla čísla ---
+            # Vizuální trik: Pro nadpisy (bold) nastavíme None pro čistý design
             if radek["bold"]:
                 val_b, val_k, val_n, val_m, val_z = None, None, None, None, ""
             else:
-                val_b, val_k, val_n, val_m, val_z = brutto_calc, korekce_calc, netto_calc, minule_netto_calc, ", ".join(
-                    masky)
+                val_b, val_k, val_n, val_m, val_z = brutto_calc, 0.0, brutto_calc, minule_netto_calc, ", ".join(masky)
 
             report_data.append({
                 "Označení": radek["ozn"],
-                "POLOŽKA": radek["n"],  # Sjednocený název pro obě strany
+                "POLOŽKA": radek["n"],
                 "Číslo řádku": radek["r"],
                 "Brutto": val_b,
                 "Korekce": val_k,
