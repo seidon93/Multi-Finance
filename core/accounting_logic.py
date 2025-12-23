@@ -108,7 +108,7 @@ SABLONA_AKTIVA_FULL = [
     {"ozn": "3.", "n": "Příjmy příštích období", "r": "81", "bold": False},
 ]
 
-# Mapování pro Pasiva - propojení čísel řádků z obrázků na účetní třídy 3 a 4
+# Mapování pro Pasiva - propojení čísel řádků na účetní třídy 3 a 4
 MAPOVANI_PASIVA_FULL = {
     "04": ["411"],       # Základní kapitál
     "05": ["252"],       # Vlastní podíly (-)
@@ -155,7 +155,7 @@ MAPOVANI_PASIVA_FULL = {
     "68": ["384"],       # Výnosy příštích období
 }
 
-# Kompletní skelet Pasiv (výběr hlavních řádků dle image_67194e.png a image_671972.png)
+# Kompletní skelet Pasiv
 SABLONA_PASIVA_FULL = [
     {"ozn": "", "n": "PASIVA CELKEM (A. + B. + C. + D.)", "r": "01", "bold": True},
     {"ozn": "A.", "n": "Vlastní kapitál", "r": "02", "bold": True},
@@ -217,6 +217,80 @@ SABLONA_PASIVA_FULL = [
     {"ozn": "2.", "n": "Výnosy příštích období", "r": "68", "bold": False},
 ]
 
+# Mapování pro Výsledovku - propojení na výnosové a nákladové účty
+MAPOVANI_VYSLEDOVKY_FULL = {
+    "01": ["601", "602"], "02": ["604"], "04": ["504"], "05": ["501", "502", "503"],
+    "06": ["511", "512", "513", "518"], "07": ["581", "582", "583", "584"],
+    "08": ["585", "586", "587", "588"], "10": ["521", "522", "523"],
+    "12": ["524"], "13": ["525", "527", "528"], "15": ["551"], "18": ["559"],
+    "19": ["558"], "21": ["641"], "22": ["642"], "23": ["644", "646", "648"],
+    "25": ["541"], "26": ["542"], "27": ["531", "532", "538"],
+    "28": ["552", "554", "555"], "29": ["543", "544", "545", "546", "547", "549"],
+    "32": ["665"], "33": ["665"], "34": ["561"], "36": ["666"], "37": ["666"],
+    "38": ["566"], "40": ["662"], "41": ["662"], "42": ["574", "579"],
+    "44": ["562"], "45": ["562"], "46": ["663", "668"], "47": ["563", "568"],
+    "51": ["591", "595"], "52": ["592"], "54": ["596"]
+}
+
+# --- SKELET VÝSLEDOVKY (56 řádků) ---
+SABLONA_VYSLEDOVKA_FULL = [
+    {"ozn": "I.", "n": "Tržby z prodeje výrobků a služeb", "r": "01", "bold": False},
+    {"ozn": "II.", "n": "Tržby za prodej zboží", "r": "02", "bold": False},
+    {"ozn": "A.", "n": "Výkonová spotřeba (součet A.1. až A.3.)", "r": "03", "bold": True},
+    {"ozn": "A.1.", "n": "Náklady vynaložené na prodané zboží", "r": "04", "bold": False},
+    {"ozn": "2.", "n": "Spotřeba materiálu a energie", "r": "05", "bold": False},
+    {"ozn": "3.", "n": "Služby", "r": "06", "bold": False},
+    {"ozn": "B.", "n": "Změna stavu zásob vlastní činnosti (+/-)", "r": "07", "bold": False},
+    {"ozn": "C.", "n": "Aktivace (-)", "r": "08", "bold": False},
+    {"ozn": "D.", "n": "Osobní náklady (součet D.1. až D.2.)", "r": "09", "bold": True},
+    {"ozn": "D.1.", "n": "Mzdové náklady", "r": "10", "bold": False},
+    {"ozn": "2.", "n": "Náklady na sociální zabezpečení a ostatní náklady", "r": "11", "bold": True},
+    {"ozn": "2.1.", "n": "Náklady na sociální zabezpečení a pojištění", "r": "12", "bold": False},
+    {"ozn": "2.2.", "n": "Ostatní náklady", "r": "13", "bold": False},
+    {"ozn": "E.", "n": "Úpravy hodnot v provozní oblasti (součet E.1. až E.3.)", "r": "14", "bold": True},
+    {"ozn": "E.1.", "n": "Úpravy hodnot DNM a DHM", "r": "15", "bold": True},
+    {"ozn": "1.1.", "n": "Úpravy hodnot DNM a DHM - trvalé", "r": "16", "bold": False},
+    {"ozn": "1.2.", "n": "Úpravy hodnot DNM a DHM - dočasné", "r": "17", "bold": False},
+    {"ozn": "2.", "n": "Úpravy hodnot zásob", "r": "18", "bold": False},
+    {"ozn": "3.", "n": "Úpravy hodnot pohledávek", "r": "19", "bold": False},
+    {"ozn": "III.", "n": "Ostatní provozní výnosy (součet III.1 až III.3.)", "r": "20", "bold": True},
+    {"ozn": "1.", "n": "Tržby z prodaného dlouhodobého majetku", "r": "21", "bold": False},
+    {"ozn": "2.", "n": "Tržby z prodaného materiálu", "r": "22", "bold": False},
+    {"ozn": "3.", "n": "Jiné provozní výnosy", "r": "23", "bold": False},
+    {"ozn": "F.", "n": "Ostatní provozní náklady (součet F.1. až F.5.)", "r": "24", "bold": True},
+    {"ozn": "F.1.", "n": "Zůstatková cena prodaného dlouhodobého majetku", "r": "25", "bold": False},
+    {"ozn": "2.", "n": "Prodaný materiál", "r": "26", "bold": False},
+    {"ozn": "3.", "n": "Daně a poplatky", "r": "27", "bold": False},
+    {"ozn": "4.", "n": "Rezervy a komplexní náklady", "r": "28", "bold": False},
+    {"ozn": "5.", "n": "Jiné provozní náklady", "r": "29", "bold": False},
+    {"ozn": "*", "n": "Provozní výsledek hospodaření (+/-)", "r": "30", "bold": True},
+    {"ozn": "IV.", "n": "Výnosy z podílů (součet IV. 1 + IV.2.)", "r": "31", "bold": True},
+    {"ozn": "1.", "n": "Výnosy z podílů – ovládaná osoba", "r": "32", "bold": False},
+    {"ozn": "2.", "n": "Ostatní výnosy z podílů", "r": "33", "bold": False},
+    {"ozn": "G.", "n": "Náklady vynaložené na prodané podíly", "r": "34", "bold": False},
+    {"ozn": "V.", "n": "Výnosy z ostatního finančního majetku", "r": "35", "bold": True},
+    {"ozn": "1.", "n": "Výnosy z finančního majetku - ovládaná osoba", "r": "36", "bold": False},
+    {"ozn": "2.", "n": "Ostatní výnosy z finančního majetku", "r": "37", "bold": False},
+    {"ozn": "H.", "n": "Náklady související s finančním majetkem", "r": "38", "bold": False},
+    {"ozn": "VI.", "n": "Výnosové úroky (součet VI. 1 + VI.2.)", "r": "39", "bold": True},
+    {"ozn": "1.", "n": "Výnosové úroky – ovládaná osoba", "r": "40", "bold": False},
+    {"ozn": "2.", "n": "Ostatní výnosové úroky", "r": "41", "bold": False},
+    {"ozn": "I.", "n": "Úpravy hodnot a rezervy ve finanční oblasti", "r": "42", "bold": False},
+    {"ozn": "J.", "n": "Nákladové úroky (součet J.1 + J.2.)", "r": "43", "bold": True},
+    {"ozn": "J.1.", "n": "Nákladové úroky - ovládaná osoba", "r": "44", "bold": False},
+    {"ozn": "2.", "n": "Ostatní nákladové úroky", "r": "45", "bold": False},
+    {"ozn": "VII.", "n": "Ostatní finanční výnosy", "r": "46", "bold": False},
+    {"ozn": "K.", "n": "Ostatní finanční náklady", "r": "47", "bold": False},
+    {"ozn": "*", "n": "Finanční výsledek hospodaření (+/-)", "r": "48", "bold": True},
+    {"ozn": "**", "n": "Výsledek hospodaření před zdaněním (+/-)", "r": "49", "bold": True},
+    {"ozn": "L.", "n": "Daň z příjmů (součet L. 1 + L.2.)", "r": "50", "bold": True},
+    {"ozn": "L.1.", "n": "Daň z příjmů splatná", "r": "51", "bold": False},
+    {"ozn": "2.", "n": "Daň z příjmů odložená (+/-)", "r": "52", "bold": False},
+    {"ozn": "**", "n": "Výsledek hospodaření po zdanění (+/-)", "r": "53", "bold": True},
+    {"ozn": "M.", "n": "Převod podílu na VH společníkům (+/-)", "r": "54", "bold": False},
+    {"ozn": "***", "n": "Výsledek hospodaření za účetní období (+/-)", "r": "55", "bold": True},
+    {"ozn": "", "n": "Čistý obrat za účetní období", "r": "56", "bold": True}
+]
 
 class AccountingEngine:
     """Třída pro výpočet účetních dat a reportů."""
@@ -1568,44 +1642,81 @@ class AccountingEngine:
 
     def get_vykaz_podklady(self, klient_id, datum_k, typ_vykazu):
         self.klient_id = klient_id
-        zustatky = self.spocti_zustatky(datum_do=datum_k)
+        zustatky = self.spocti_zustatky(datum_do=datum_k)  #
         report_data = []
 
         if "Aktiva" in typ_vykazu:
             sablona, mapovani = SABLONA_AKTIVA_FULL, MAPOVANI_AKTIV_FULL
-        else:
+        elif "Pasiva" in typ_vykazu:
             sablona, mapovani = SABLONA_PASIVA_FULL, MAPOVANI_PASIVA_FULL
+        else:
+            sablona, mapovani = SABLONA_VYSLEDOVKA_FULL, MAPOVANI_VYSLEDOVKY_FULL
 
-        # Předvýpočet HV pro řádek 21 Pasiv
-        rep_hv = self.get_report_data(datum_do=datum_k)
-        hv_aktualni = rep_hv['hospodarsky_vysledek'] if rep_hv else 0.0
-
+        vals = {}
         for radek in sablona:
-            masky = mapovani.get(radek["r"], [])
+            r_id = radek["r"]
+            masky = mapovani.get(r_id, [])
 
-            # Agregace analytiky
-            if "Pasiva" in typ_vykazu and radek["r"] == "21":
-                # Speciální logika pro HV běžného období
-                brutto_calc = hv_aktualni
+            # Sčítání analytiky
+            if r_id in mapovani:
+                val = sum(float(val) for u, val in zustatky.items() if any(str(u).startswith(m) for m in masky))
+                if any(m.startswith('6') for m in masky):
+                    val = abs(val)  # Výnosy kladně
+                else:
+                    val = -abs(val)  # Náklady záporně
             else:
-                brutto_calc = sum(float(val) for u, val in zustatky.items() if any(str(u).startswith(m) for m in masky))
-                # Pasiva otáčíme na kladná čísla (v DB jsou na straně D jako záporná)
-                if "Pasiva" in typ_vykazu: brutto_calc = abs(brutto_calc)
+                # Výpočet mezisoučtů pro výsledovku
+                if r_id == "03":
+                    val = sum(vals.get(i, 0) for i in ["04", "05", "06"])
+                elif r_id == "09":
+                    val = sum(vals.get(i, 0) for i in ["10", "11"])
+                elif r_id == "11":
+                    val = sum(vals.get(i, 0) for i in ["12", "13"])
+                elif r_id == "14":
+                    val = sum(vals.get(i, 0) for i in ["15", "18", "19"])
+                elif r_id == "20":
+                    val = sum(vals.get(i, 0) for i in ["21", "22", "23"])
+                elif r_id == "24":
+                    val = sum(vals.get(i, 0) for i in ["25", "26", "27", "28", "29"])
+                elif r_id == "30":
+                    val = sum(vals.get(i, 0) for i in ["01", "02", "03", "07", "08", "09", "14", "20", "24"])
+                elif r_id == "31":
+                    val = sum(vals.get(i, 0) for i in ["32", "33"])
+                elif r_id == "35":
+                    val = sum(vals.get(i, 0) for i in ["36", "37"])
+                elif r_id == "39":
+                    val = sum(vals.get(i, 0) for i in ["40", "41"])
+                elif r_id == "43":
+                    val = sum(vals.get(i, 0) for i in ["44", "45"])
+                elif r_id == "48":
+                    val = sum(vals.get(i, 0) for i in ["31", "34", "35", "38", "39", "42", "43", "46", "47"])
+                elif r_id == "49":
+                    val = vals.get("30", 0) + vals.get("48", 0)
+                elif r_id == "50":
+                    val = sum(vals.get(i, 0) for i in ["51", "52"])
+                elif r_id == "53":
+                    val = vals.get("49", 0) + vals.get("50", 0)
+                elif r_id == "55":
+                    val = vals.get("53", 0) + vals.get("54", 0)
+                elif r_id == "56":
+                    val = sum(abs(vals.get(i, 0)) for i in ["01", "02", "20", "31", "35", "39", "46"])
+                else:
+                    val = 0.0
 
-            minule_netto_calc = self.get_minule_obdobi_netto(typ_vykazu, datum_k.year, radek["r"])
+            vals[r_id] = val
+            minule = self.get_minule_obdobi_netto(typ_vykazu, datum_k.year, r_id)
 
-            # Vizuální trik: Pro nadpisy (bold) nastavíme None pro čistý design
+            # Vizuální trik: U nadpisů (bold) nastavíme None, aby v UI nebyla čísla
             if radek["bold"]:
-                val_b, val_k, val_n, val_m, val_z = None, None, None, None, ""
+                val_b, val_n, val_m, val_z = None, None, None, ""
             else:
-                val_b, val_k, val_n, val_m, val_z = brutto_calc, 0.0, brutto_calc, minule_netto_calc, ", ".join(masky)
+                val_b, val_n, val_m, val_z = val, val, minule, ", ".join(masky)
 
             report_data.append({
                 "Označení": radek["ozn"],
                 "POLOŽKA": radek["n"],
-                "Číslo řádku": radek["r"],
+                "Číslo řádku": r_id,
                 "Brutto": val_b,
-                "Korekce": val_k,
                 "Netto": val_n,
                 "Minulé období": val_m,
                 "Zdroj": val_z,
