@@ -292,6 +292,55 @@ SABLONA_VYSLEDOVKA_FULL = [
     {"ozn": "", "n": "Čistý obrat za účetní období", "r": "56", "bold": True}
 ]
 
+# --- MAPOVÁNÍ CASH FLOW ---
+MAPOVANI_CF_FULL = {
+    "P": ["211", "221", "213"],   # Začátek období
+    "A11": ["551"],               # Odpisy (+)
+    "A12": ["552", "554", "559"], # Změna rezerv a OP
+    "A14": ["665"],               # Výnosy z podílů (-)
+    "A15": ["562", "662"],        # Nákladové a výnosové úroky
+    "A21": ["311", "315", "378"], # Pohledávky
+    "A22": ["321", "325", "379"], # Závazky
+    "A23": ["112", "123", "132"], # Zásoby
+    "A24": ["251", "253"],        # Krátkodobý fin. majetek
+    "B1": ["041", "042"],         # Výdaje na stálá aktiva
+    "B2": ["641"],                # Příjmy z prodeje majetku
+    "C21": ["411"],               # Zvýšení zákl. kapitálu
+    "C26": ["432", "364"],        # Vyplacené dividendy (-)
+    "R": ["211", "221", "213"]    # Konec období
+}
+
+# --- SKELET CASH FLOW (DLE VAŠEHO SEZNAMU) ---
+SABLONA_CF_FULL = [
+    {"ozn": "P.", "n": "Stav peněžních prostředků (PP) na začátku účetního období", "r": "", "bold": True},
+    {"ozn": "", "n": "PENĚŽNÍ TOKY Z PROVOZNÍ ČINNOSTI", "r": "", "bold": True},
+    {"ozn": "Z.", "n": "Účetní zisk nebo ztráta před zdaněním", "r": "01", "bold": False},
+    {"ozn": "A.1.", "n": "Úprava o nepeněžní operace", "r": "02", "bold": True},
+    {"ozn": "A.1.1.", "n": "Odpisy stálých aktiv (+)", "r": "03", "bold": False},
+    {"ozn": "A.1.2.", "n": "Změna stavu opravných položek, rezerv", "r": "04", "bold": False},
+    {"ozn": "A.1.3.", "n": "Zisk (ztráta) z prodeje stálých aktiv (+/-)", "r": "05", "bold": False},
+    {"ozn": "A.1.4.", "n": "Výnosy z dividend a podílů na zisku (-)", "r": "06", "bold": False},
+    {"ozn": "A.1.5.", "n": "Vyúčtované nákladové a výnosové úroky (+/-)", "r": "07", "bold": False},
+    {"ozn": "A.*", "n": "Čistý peněžní tok z provozní činnosti před zdaněním a změnami PK", "r": "08", "bold": True},
+    {"ozn": "A.2.", "n": "Změna stavu nepeněžních složek pracovního kapitálu", "r": "09", "bold": True},
+    {"ozn": "A.2.1.", "n": "Změna stavu pohledávek (+/-)", "r": "10", "bold": False},
+    {"ozn": "A.2.2.", "n": "Změna stavu krátkodobých závazků (+/-)", "r": "11", "bold": False},
+    {"ozn": "A.2.3.", "n": "Změna stavu zásob (+/-)", "r": "12", "bold": False},
+    {"ozn": "A.**", "n": "Čistý peněžní tok z provozní činnosti před zdaněním", "r": "13", "bold": True},
+    {"ozn": "A.***", "n": "Čistý peněžní tok z provozní činnosti", "r": "14", "bold": True},
+    {"ozn": "", "n": "PENĚŽNÍ TOKY Z INVESTIČNÍ ČINNOSTI", "r": "15", "bold": True},
+    {"ozn": "B.1.", "n": "Výdaje spojené s nabytím stálých aktiv", "r": "16", "bold": False},
+    {"ozn": "B.2.", "n": "Příjmy z prodeje stálých aktiv", "r": "17", "bold": False},
+    {"ozn": "B.***", "n": "Čistý peněžní tok z investiční činnosti", "18": "B_CELKEM", "bold": True},
+    {"ozn": "", "n": "PENĚŽNÍ TOKY Z FINANČNÍCH ČINNOSTÍ", "r": "19", "bold": True},
+    {"ozn": "C.1.", "n": "Dopady změn dlouhodobých závazků", "r": "20", "bold": False},
+    {"ozn": "C.2.1.", "n": "Zvýšení základního kapitálu (+)", "r": "21", "bold": False},
+    {"ozn": "C.2.6.", "n": "Vyplacené dividendy (-)", "r": "22", "bold": False},
+    {"ozn": "C.***", "n": "Čistý peněžní tok z finanční činnosti", "r": "CELKEM_FČ", "bold": True},
+    {"ozn": "F.", "n": "Čisté zvýšení, resp. snížení peněžních prostředků", "r": "(+/-)", "bold": True},
+    {"ozn": "R.", "n": "Stav peněžních prostředků na konci účetního období", "r": "CELKEM_KONEC", "bold": True},
+]
+
 class AccountingEngine:
     """Třída pro výpočet účetních dat a reportů."""
 
@@ -1642,75 +1691,55 @@ class AccountingEngine:
 
     def get_vykaz_podklady(self, klient_id, datum_k, typ_vykazu):
         self.klient_id = klient_id
-        zustatky = self.spocti_zustatky(datum_do=datum_k)  #
+        # Načtení zůstatků k aktuálnímu dni
+        zustatky = self.spocti_zustatky(datum_do=datum_k)
+        # Načtení počátečních stavů (k 1.1. daného roku)
+        datum_start_roku = date(datum_k.year, 1, 1)
+        zustatky_start = self.spocti_zustatky(datum_do=datum_start_roku)
+
         report_data = []
 
+        # Výběr šablony
         if "Aktiva" in typ_vykazu:
             sablona, mapovani = SABLONA_AKTIVA_FULL, MAPOVANI_AKTIV_FULL
         elif "Pasiva" in typ_vykazu:
             sablona, mapovani = SABLONA_PASIVA_FULL, MAPOVANI_PASIVA_FULL
-        else:
+        elif "Vysledovka" in typ_vykazu:
             sablona, mapovani = SABLONA_VYSLEDOVKA_FULL, MAPOVANI_VYSLEDOVKY_FULL
+        else:
+            sablona, mapovani = SABLONA_CF_FULL, MAPOVANI_CF_FULL
 
         vals = {}
         for radek in sablona:
             r_id = radek["r"]
             masky = mapovani.get(r_id, [])
 
-            # Sčítání analytiky
-            if r_id in mapovani:
-                val = sum(float(val) for u, val in zustatky.items() if any(str(u).startswith(m) for m in masky))
-                if any(m.startswith('6') for m in masky):
-                    val = abs(val)  # Výnosy kladně
-                else:
-                    val = -abs(val)  # Náklady záporně
+            # Logika výpočtu pro CF
+            if r_id == "P0":  # Počáteční peníze
+                val = sum(float(v) for u, v in zustatky_start.items() if any(str(u).startswith(m) for m in masky))
+            elif r_id == "R":  # Koncové peníze
+                val = sum(float(v) for u, v in zustatky.items() if any(str(u).startswith(m) for m in masky))
+            elif r_id == "A1":  # Zisk (třeba dotáhnout z výsledovky)
+                res_v = self.get_report_data(datum_od=datum_start_roku, datum_do=datum_k)
+                val = res_v['hospodarsky_vysledek'] if res_v else 0.0
+            elif r_id == "F":  # Čistá změna
+                val = vals.get("R", 0) - vals.get("P0", 0)
+            elif r_id == "A_CELKEM":
+                val = vals.get("A1", 0) + vals.get("A21", 0) + vals.get("A22", 0)
             else:
-                # Výpočet mezisoučtů pro výsledovku
-                if r_id == "03":
-                    val = sum(vals.get(i, 0) for i in ["04", "05", "06"])
-                elif r_id == "09":
-                    val = sum(vals.get(i, 0) for i in ["10", "11"])
-                elif r_id == "11":
-                    val = sum(vals.get(i, 0) for i in ["12", "13"])
-                elif r_id == "14":
-                    val = sum(vals.get(i, 0) for i in ["15", "18", "19"])
-                elif r_id == "20":
-                    val = sum(vals.get(i, 0) for i in ["21", "22", "23"])
-                elif r_id == "24":
-                    val = sum(vals.get(i, 0) for i in ["25", "26", "27", "28", "29"])
-                elif r_id == "30":
-                    val = sum(vals.get(i, 0) for i in ["01", "02", "03", "07", "08", "09", "14", "20", "24"])
-                elif r_id == "31":
-                    val = sum(vals.get(i, 0) for i in ["32", "33"])
-                elif r_id == "35":
-                    val = sum(vals.get(i, 0) for i in ["36", "37"])
-                elif r_id == "39":
-                    val = sum(vals.get(i, 0) for i in ["40", "41"])
-                elif r_id == "43":
-                    val = sum(vals.get(i, 0) for i in ["44", "45"])
-                elif r_id == "48":
-                    val = sum(vals.get(i, 0) for i in ["31", "34", "35", "38", "39", "42", "43", "46", "47"])
-                elif r_id == "49":
-                    val = vals.get("30", 0) + vals.get("48", 0)
-                elif r_id == "50":
-                    val = sum(vals.get(i, 0) for i in ["51", "52"])
-                elif r_id == "53":
-                    val = vals.get("49", 0) + vals.get("50", 0)
-                elif r_id == "55":
-                    val = vals.get("53", 0) + vals.get("54", 0)
-                elif r_id == "56":
-                    val = sum(abs(vals.get(i, 0)) for i in ["01", "02", "20", "31", "35", "39", "46"])
-                else:
-                    val = 0.0
+                # Ostatní řádky přes sčítání analytiky
+                val = sum(float(v) for u, v in zustatky.items() if any(str(u).startswith(m) for m in masky))
+                if r_id.startswith('A'): val = abs(val)  # Odpisy apod. kladně
+                if r_id in ['B', 'C']: val = -abs(val)  # Investice a splátky záporně
 
             vals[r_id] = val
             minule = self.get_minule_obdobi_netto(typ_vykazu, datum_k.year, r_id)
 
-            # Vizuální trik: U nadpisů (bold) nastavíme None, aby v UI nebyla čísla
-            if radek["bold"]:
-                val_b, val_n, val_m, val_z = None, None, None, ""
+            # Vizuální trik: U nadpisů skryjeme čísla pro design přes celou tabulku
+            if radek["bold"] and r_id not in ["P0", "R", "F", "A_CELKEM"]:
+                val_b, val_n, val_m = None, None, None
             else:
-                val_b, val_n, val_m, val_z = val, val, minule, ", ".join(masky)
+                val_b, val_n, val_m = val, val, minule
 
             report_data.append({
                 "Označení": radek["ozn"],
@@ -1719,7 +1748,6 @@ class AccountingEngine:
                 "Brutto": val_b,
                 "Netto": val_n,
                 "Minulé období": val_m,
-                "Zdroj": val_z,
                 "is_bold": radek["bold"]
             })
         return report_data

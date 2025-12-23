@@ -170,10 +170,35 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
             st.rerun()
 
         if 'draft_cf' in st.session_state:
-            df_cf_view = st.session_state['draft_cf'].copy()
-            df_cf_view.loc[df_cf_view['is_bold'] == True, ["Brutto"]] = None
-            st.data_editor(df_cf_view.style.apply(style_header, axis=1), column_config={"is_bold": None},
-                           hide_index=True, use_container_width=True, key="ed_cf_v7")
+            raw_cf = st.session_state['draft_cf']
+
+            # Bezpečné načtení finální změny stavu (řádek F)
+            cista_zmena = get_val_by_r(raw_cf, 'F', 'Brutto')
+
+            st.info(f"🌊 **Čistý tok hotovosti za období:** {cista_zmena:,.2f} Kč".replace(',', ' '))
+
+            # Vizuální úprava (vyčištění nadpisů pro tmavý design přes celou šířku)
+            df_cf_view = raw_cf.copy()
+            # Ponecháme čísla jen u klíčových součtových řádků a datových řádků
+            df_cf_view.loc[
+                (df_cf_view['is_bold'] == True) & (~df_cf_view['Číslo řádku'].isin(['P0', 'R', 'F', 'A_CELKEM'])),
+                ["Brutto", "Netto", "Minulé období"]] = None
+
+            st.data_editor(
+                df_cf_view.style.apply(style_header, axis=1),
+                column_config={
+                    "is_bold": None,
+                    "Brutto": st.column_config.NumberColumn("Částka", format="%.2f"),
+                    "Minulé období": st.column_config.NumberColumn("Minulé", format="%.2f"),
+                    "Netto": None
+                },
+                disabled=["Označení", "Číslo řádku", "POLOŽKA"],
+                hide_index=True, use_container_width=True, key="ed_cf_final_v8"
+            )
+
+            # Finální metrika: Stav peněz na konci (řádek R)
+            stav_koncovy = get_val_by_r(raw_cf, 'R', 'Brutto')
+            st.metric("Disponibilní hotovost k rozvahovému dni (R.)", f"{stav_koncovy:,.2f} Kč".replace(',', ' '))
 
 
 # --- ARCHIV FUNKCE ---
