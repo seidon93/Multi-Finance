@@ -64,8 +64,17 @@ from datetime import date, datetime
 
 
 def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
+    # 1. Načtení informací o klientovi pro hlavičku
     klient_info = engine.get_klient_info(KLIENT_ID)
     st.header(f"📂 Účetní výkazy pro: {klient_info['nazev']}")
+
+    # Pomocná funkce pro bezpečné získání hodnoty z konkrétního řádku (prevence NaN)
+    def get_val_by_r(df, r_code, col='Netto'):
+        if df is None or df.empty: return 0.0
+        val = df[df['Číslo řádku'] == r_code][col].values
+        if len(val) > 0 and pd.notnull(val[0]):
+            return float(val[0])
+        return 0.0
 
     with st.expander("📝 Nastavení hlavičky výkazu", expanded=True):
         c1, c2, c3 = st.columns([2, 1, 1])
@@ -78,12 +87,13 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
 
     tab_r, tab_v, tab_cf, tab_arch = st.tabs(["⚖️ Rozvaha", "📈 Výsledovka", "💸 Cash Flow", "📁 Archiv"])
 
+    # Styl pro profesionální zvýraznění řádků
     def style_header(row):
         if row.get('is_bold'):
             return ['background-color: #1a1c23; color: white; font-weight: bold'] * len(row)
         return [''] * len(row)
 
-    # --- ⚖️ ROZVAHA (Aktiva/Pasiva) ---
+    # --- ⚖️ ROZVAHA ---
     with tab_r:
         if st.button("✨ Generovat data pro Rozvahu", use_container_width=True):
             st.session_state['draft_rozvaha_a'] = pd.DataFrame(
@@ -93,21 +103,28 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
             st.rerun()
 
         if 'draft_rozvaha_a' in st.session_state:
-            sekce_r = st.segmented_control("Část výkazu:", options=["🟢 AKTIVA", "🔴 PASIVA"], default="🟢 AKTIVA")
-            df = st.session_state['draft_rozvaha_a'] if sekce_r == "🟢 AKTIVA" else st.session_state['draft_rozvaha_p']
+            sekce_r = st.segmented_control("Vyberte část výkazu:", options=["🟢 AKTIVA", "🔴 PASIVA"], default="🟢 AKTIVA")
 
-            # Vizuální úprava: Pro nadpisy skryjeme čísla pro čistý vzhled přes celou tabulku
-            df_view = df.copy()
-            df_view.loc[df_view['is_bold'] == True, ["Brutto", "Korekce", "Netto", "Minulé období", "Zdroj"]] = None
+            # Načtení dat podle vybrané sekce
+            is_aktiva = (sekce_r == "🟢 AKTIVA")
+            source_df = st.session_state['draft_rozvaha_a'] if is_aktiva else st.session_state['draft_rozvaha_p']
 
+            # VIZUÁLNÍ ÚPRAVA: Pro nadpisy (bold) vymažeme čísla
+            df_view = source_df.copy()
+            cols_to_clear = ["Brutto", "Korekce", "Netto", "Minulé období", "Zdroj"]
+            df_view.loc[df_view['is_bold'] == True, [c for c in cols_to_clear if c in df_view.columns]] = None
+
+            st.subheader(f"{'Aktiva (Majetek)' if is_aktiva else 'Pasiva (Zdroje)'} - Plný rozsah")
             st.data_editor(df_view.style.apply(style_header, axis=1), hide_index=True, use_container_width=True,
                            column_config={"is_bold": None, "Brutto": st.column_config.NumberColumn(format="%.2f"),
                                           "Netto": st.column_config.NumberColumn(format="%.2f")},
-                           disabled=["Označení", "Číslo řádku", "POLOŽKA"], key=f"ed_roz_{sekce_r}")
+                           disabled=["Označení", "Číslo řádku", "POLOŽKA"], key=f"ed_roz_{sekce_r}_final")
 
-            sum_a = st.session_state['draft_rozvaha_a']['Netto'].fillna(0).sum()
-            sum_p = st.session_state['draft_rozvaha_p']['Netto'].fillna(0).sum()
+            # --- FIX NaN: Načtení celků přímo z řádků 01 ---
+            sum_a = get_val_by_r(st.session_state['draft_rozvaha_a'], '01', 'Netto')
+            sum_p = get_val_by_r(st.session_state['draft_rozvaha_p'], '01', 'Brutto')
             rozdil = round(sum_a - sum_p, 2)
+
             c1, c2, c3 = st.columns(3)
             c1.metric("Aktiva celkem", f"{sum_a:,.2f} Kč".replace(',', ' '))
             c2.metric("Pasiva celkem", f"{sum_p:,.2f} Kč".replace(',', ' '))
@@ -124,37 +141,27 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
             st.rerun()
 
         if 'draft_vysledovka' in st.session_state:
-            df_v = st.session_state['draft_vysledovka'].copy()
+            raw_v = st.session_state['draft_vysledovka']
 
-            # --- BANNER PRO OBCHODNÍ MARŽI (Výpočet: II - A.1) ---
-            # Načteme surová data pro výpočet (protože v df_v mohou být None u nadpisů)
-            raw_data = engine.get_vykaz_podklady(KLIENT_ID, datum_k, "Vysledovka")
-            raw_df = pd.DataFrame(raw_data)
-
-            # Tržby za zboží (02) a Náklady na zboží (04)
-            val_02 = raw_df[raw_df['Číslo řádku'] == '02']['Brutto'].values[0] or 0
-            val_04 = raw_df[raw_df['Číslo řádku'] == '04']['Brutto'].values[0] or 0
-            # Náklady (04) jsou v engine záporné, proto sčítáme
-            obchodni_marze = val_02 + val_04
-
+            # Banner pro Obchodní marži (načteno z řádku 02 a 04)
+            obchodni_marze = get_val_by_r(raw_v, '02', 'Brutto') + get_val_by_r(raw_v, '04', 'Brutto')
             st.info(f"📊 **Obchodní marže (II. - A.1.):** {obchodni_marze:,.2f} Kč".replace(',', ' '))
 
-            # Vizuální tabulka se sjednoceným zvýrazněním
-            st.data_editor(
-                df_v.style.apply(style_header, axis=1),
-                column_config={
-                    "is_bold": None,
-                    "Brutto": st.column_config.NumberColumn("Běžné", format="%.2f"),
-                    "Minulé období": st.column_config.NumberColumn("Minulé", format="%.2f"),
-                    "Netto": None
-                },
-                disabled=["Označení", "Číslo řádku", "POLOŽKA"],
-                hide_index=True, use_container_width=True, key="ed_vys_v_full_56"
-            )
+            # Vizuální úprava výsledovky (vyčištění nadpisů)
+            df_v_view = raw_v.copy()
+            df_v_view.loc[df_v_view['is_bold'] == True, ["Brutto", "Netto", "Minulé období", "Zdroj"]] = None
 
-            # Výsledek hospodaření za období (řádek 55)
-            vh_obdobi = raw_df[raw_df['Číslo řádku'] == '55']['Brutto'].values[0] or 0
-            st.metric("VH za účetní období (***)", f"{vh_obdobi:,.2f} Kč".replace(',', ' '))
+            st.data_editor(df_v_view.style.apply(style_header, axis=1),
+                           column_config={"is_bold": None,
+                                          "Brutto": st.column_config.NumberColumn("Běžné", format="%.2f"),
+                                          "Minulé období": st.column_config.NumberColumn("Minulé", format="%.2f"),
+                                          "Netto": None},
+                           disabled=["Označení", "Číslo řádku", "POLOŽKA"],
+                           hide_index=True, use_container_width=True, key="ed_vys_final_v7")
+
+            # --- FIX NaN: Načtení výsledku hospodaření z řádku 55 ---
+            vh_konecny = get_val_by_r(raw_v, '55', 'Brutto')
+            st.metric("Výsledek hospodaření za účetní období (***)", f"{vh_konecny:,.2f} Kč".replace(',', ' '))
 
     # --- 💸 CASH FLOW ---
     with tab_cf:
@@ -163,9 +170,10 @@ def zobrazit_ucetni_zaznamy(engine, KLIENT_ID, execute_query):
             st.rerun()
 
         if 'draft_cf' in st.session_state:
-            st.data_editor(st.session_state['draft_cf'].style.apply(style_header, axis=1),
-                           column_config={"is_bold": None, "Brutto": st.column_config.NumberColumn(format="%.2f")},
-                           hide_index=True, use_container_width=True, key="ed_cf_v5")
+            df_cf_view = st.session_state['draft_cf'].copy()
+            df_cf_view.loc[df_cf_view['is_bold'] == True, ["Brutto"]] = None
+            st.data_editor(df_cf_view.style.apply(style_header, axis=1), column_config={"is_bold": None},
+                           hide_index=True, use_container_width=True, key="ed_cf_v7")
 
 
 # --- ARCHIV FUNKCE ---
