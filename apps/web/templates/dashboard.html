@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multi-Finance · Přehled</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+</head>
+<body>
+  <aside>
+    <div class="brand"><span>MF</span> Multi-Finance</div>
+    <nav><a class="active" href="#">Přehled</a><a href="#">Účetní deník</a><a href="#">Faktury</a><a href="#">Výkazy</a><a href="#">Nastavení</a></nav>
+    <div class="profile">Firma · klient #1</div>
+  </aside>
+  <main>
+    <header><div><p class="eyebrow">FINANCE OVERVIEW</p><h1>Dobré ráno</h1><p class="muted">Přehled účetnictví za {{ dashboard.period }}</p></div><button>+ Nový doklad</button></header>
+    {% if not dashboard.available %}<section class="notice"><strong>Režim náhledu.</strong> {{ dashboard.message }}</section>{% endif %}
+    <section class="cards">
+      <article><p>Hrubý pracovní kapitál</p><strong>{{ "{0:,.0f}".format(dashboard.metrics.gross_wc).replace(',', ' ') }} Kč</strong><span>Aktiva a pohledávky</span></article>
+      <article><p>Čistý pracovní kapitál</p><strong>{{ "{0:,.0f}".format(dashboard.metrics.net_wc).replace(',', ' ') }} Kč</strong><span>Po odečtení krátkodobých závazků</span></article>
+      <article><p>Likvidní kapitál</p><strong>{{ "{0:,.0f}".format(dashboard.metrics.liquid_wc).replace(',', ' ') }} Kč</strong><span>Peněžní prostředky</span></article>
+    </section>
+    <section class="grid">
+      <article class="panel"><div class="panel-title"><h2>Pohledávky a závazky</h2><a href="#">Zobrazit vše</a></div>
+        <table><thead><tr><th>Partner</th><th>Typ</th><th>Splatnost</th><th>Částka</th></tr></thead><tbody>
+        {% for row in dashboard.invoices %}<tr><td><strong>{{ row.partner }}</strong><small>{{ row.description }}</small></td><td><span class="badge {{ 'payable' if row.kind == 'Závazek' else '' }}">{{ row.kind }}</span></td><td>{{ row.due_date }}</td><td>{{ "{0:,.2f}".format(row.amount).replace(',', ' ') }} Kč</td></tr>{% else %}<tr><td colspan="4" class="empty">Zatím nejsou k dispozici žádná data.</td></tr>{% endfor %}</tbody></table>
+      </article>
+      <article class="panel chart"><div class="panel-title"><h2>Příjmy a výdaje</h2><span>2026</span></div><div class="chart-placeholder"><div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><p>Po připojení databáze se zde zobrazí trend hospodaření.</p></div></article>
+    </section>
+  </main>
+</body>
+</html>

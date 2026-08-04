@@ -1,0 +1,10 @@
+# New GUI prototype (does not require Streamlit)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+jinja2>=3.1
+PySide6>=6.8
+pandas>=2.2
+plotly>=5.24
+pyodbc>=5.2
+python-dotenv>=1.0
+
